@@ -22,10 +22,12 @@ const logoImage =
 
 function HomeScreen({
   onRequestBlood,
+  onFindDonor,
   onRequests,
   onProfile,
 }: {
   onRequestBlood: () => void;
+  onFindDonor: () => void;
   onRequests: () => void;
   onProfile: () => void;
 }) {
@@ -100,7 +102,7 @@ function HomeScreen({
             </View>
           </Pressable>
 
-          <Pressable style={styles.quickCard} accessibilityLabel="Find Donor">
+          <Pressable style={styles.quickCard} onPress={onFindDonor} accessibilityLabel="Find Donor">
             <View style={styles.quickIconWrapAlt}>
               <MaterialCommunityIcons name="magnify" size={20} color="#191c1e" />
             </View>
@@ -156,6 +158,297 @@ function HomeScreen({
         <Pressable style={styles.tabItem} onPress={onProfile} accessibilityLabel="Profile">
           <MaterialCommunityIcons name="account" size={20} color="#59413e" />
           <Text style={styles.tabText}>Profile</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+type Donor = {
+  name: string;
+  blood: string;
+  distance: string;
+  lastDonation: string;
+  available: boolean;
+};
+
+const mockDonors: Donor[] = [
+  {
+    name: 'Rahul S.',
+    blood: 'O+',
+    distance: 'Approx. 2.1 km away',
+    lastDonation: '3 months ago',
+    available: true,
+  },
+  {
+    name: 'Ananya M.',
+    blood: 'O+',
+    distance: 'Approx. 4.5 km away',
+    lastDonation: '6 months ago',
+    available: true,
+  },
+];
+
+function FindDonorScreen({
+  onBack,
+  onHome,
+  onRequests,
+  onProfile,
+}: {
+  onBack: () => void;
+  onHome: () => void;
+  onRequests: () => void;
+  onProfile: () => void;
+}) {
+  const [selectedBlood, setSelectedBlood] = useState('O+');
+  const [radius, setRadius] = useState('10 km');
+  const [acceptedDonor, setAcceptedDonor] = useState<Donor | null>(null);
+  const [showEmptyState, setShowEmptyState] = useState(false);
+
+  const visibleDonors = showEmptyState
+    ? []
+    : mockDonors.filter((donor) => donor.blood === selectedBlood && donor.available);
+
+  const requestDonor = (donor: Donor) => {
+    Alert.alert(
+      `Request ${donor.name}?`,
+      `Send an in-app request for ${donor.blood} blood at AMRI Hospital, Kolkata.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send Request', onPress: () => setAcceptedDonor(donor) },
+      ],
+    );
+  };
+
+  return (
+    <View style={styles.findDonorScreen}>
+      <StatusBar style="dark" />
+
+      <View style={styles.findDonorHeader}>
+        <View style={styles.findDonorHeaderLeft}>
+          <Pressable style={styles.requestBackButton} onPress={onBack} accessibilityLabel="Go back to home">
+            <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
+          </Pressable>
+          <Text style={styles.requestTitle}>Find Donor</Text>
+        </View>
+        <View style={styles.findDonorHeaderActions}>
+          <View style={styles.findDonorHeaderIcon}>
+            <MaterialCommunityIcons name="map-marker" size={20} color="#191c1e" />
+          </View>
+          <View style={styles.findDonorHeaderIcon}>
+            <MaterialCommunityIcons name="account" size={20} color="#191c1e" />
+          </View>
+        </View>
+      </View>
+
+      <ScrollView
+        style={styles.findDonorScroll}
+        contentContainerStyle={styles.findDonorContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.findDonorSubtitle}>
+          Find a compatible donor near you - connect with nearby available donors safely.
+        </Text>
+
+        <View style={styles.findDonorCard}>
+          <View style={styles.findDonorLocationRow}>
+            <View style={styles.findDonorLocationInfo}>
+              <View style={styles.findDonorIconCircle}>
+                <MaterialCommunityIcons name="map-marker" size={20} color="#760009" />
+              </View>
+              <View>
+                <Text style={styles.findDonorLabel}>Current Location</Text>
+                <Text style={styles.findDonorLocation}>Kolkata, West Bengal</Text>
+              </View>
+            </View>
+            <Pressable onPress={() => Alert.alert('Location', 'Location selection will connect to a location service later.')}>
+              <Text style={styles.findDonorChange}>Change</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.findDonorMetaRow}>
+            <Text style={styles.findDonorMeta}>Searching within {radius} radius</Text>
+            <Text style={styles.findDonorActive}>{visibleDonors.length} Donors Active</Text>
+          </View>
+
+          <View style={styles.chipRow}>
+            {['5 km', '10 km', '25 km', '50 km'].map((option) => (
+              <Pressable
+                key={option}
+                onPress={() => setRadius(option)}
+                style={[styles.filterChip, radius === option && styles.filterChipSelected]}
+              >
+                <Text style={[styles.filterChipText, radius === option && styles.filterChipTextSelected]}>
+                  {option}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.findDonorSectionHeader}>
+          <Text style={styles.findDonorSectionTitle}>Select Blood Group</Text>
+          <Text style={styles.findDonorLabel}>Tap to filter</Text>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bloodChoiceRow}>
+          {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => (
+            <Pressable
+              key={group}
+              onPress={() => {
+                setSelectedBlood(group);
+                setShowEmptyState(false);
+              }}
+              style={[styles.bloodChoice, selectedBlood === group && styles.bloodChoiceSelected]}
+            >
+              <Text style={[styles.bloodChoiceText, selectedBlood === group && styles.bloodChoiceTextSelected]}>
+                {group}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <View style={styles.compatibilityNote}>
+          <MaterialCommunityIcons name="information-outline" size={16} color="#760009" />
+          <Text style={styles.compatibilityText}>Compatible blood groups highlighted based on patient requirement.</Text>
+        </View>
+
+        <View style={styles.filterRow}>
+          <Pressable style={styles.smallFilter} onPress={() => setShowEmptyState((current) => !current)}>
+            <MaterialCommunityIcons name="check-circle" size={16} color="#760009" />
+            <Text style={styles.smallFilterText}>{showEmptyState ? 'Show Available' : 'Available Now'}</Text>
+          </Pressable>
+          <Pressable style={styles.smallFilter} onPress={() => setRadius('5 km')}>
+            <MaterialCommunityIcons name="near-me" size={16} color="#760009" />
+            <Text style={styles.smallFilterText}>Distance: Nearest</Text>
+          </Pressable>
+          <View style={styles.smallFilter}>
+            <MaterialCommunityIcons name="history" size={16} color="#760009" />
+            <Text style={styles.smallFilterText}>Last Donation</Text>
+          </View>
+        </View>
+
+        {acceptedDonor ? (
+          <View style={styles.acceptedCard}>
+            <View style={styles.acceptedHeader}>
+              <View style={styles.acceptedTitleRow}>
+                <MaterialCommunityIcons name="heart" size={24} color="#760009" />
+                <Text style={styles.findDonorSectionTitle}>Donor Accepted</Text>
+              </View>
+              <Text style={styles.confirmedBadge}>Confirmed</Text>
+            </View>
+            <Text style={styles.acceptedText}>
+              {acceptedDonor.name} has accepted your blood request and is ready to help at AMRI Hospital.
+            </Text>
+            <View style={styles.acceptedActions}>
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Call Donor', 'Calling is available after verified contact details are shared.')}>
+                <MaterialCommunityIcons name="phone" size={20} color="#760009" />
+                <Text style={styles.acceptedActionText}>Call Donor</Text>
+              </Pressable>
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('WhatsApp', 'WhatsApp contact will be enabled after donor acceptance.')}>
+                <MaterialCommunityIcons name="message-text" size={20} color="#760009" />
+                <Text style={styles.acceptedActionText}>WhatsApp</Text>
+              </Pressable>
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Location Sharing', 'The donor can choose whether to share an exact location.')}>
+                <MaterialCommunityIcons name="navigation" size={20} color="#760009" />
+                <Text style={styles.acceptedActionText}>Navigate</Text>
+              </Pressable>
+            </View>
+            <View style={styles.locationPrivacyBox}>
+              <MaterialCommunityIcons name="lock" size={18} color="#59413e" />
+              <Text style={styles.locationPrivacyText}>Exact location is shared only if the donor explicitly chooses to share it.</Text>
+            </View>
+            <View style={styles.pickupRow}>
+              <View style={styles.pickupTextWrap}>
+                <Text style={styles.pickupTitle}>Need Hospital Pickup?</Text>
+                <Text style={styles.findDonorMeta}>Verified hospitals can request cab support for donors.</Text>
+              </View>
+              <Pressable style={styles.requestPickupButton} onPress={() => Alert.alert('Hospital Pickup', 'Pickup requests will be connected to verified hospitals later.')}>
+                <Text style={styles.requestPickupText}>Request Pickup</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.findDonorResults}>
+            <View style={styles.findDonorResultsHeader}>
+              <View>
+                <Text style={styles.findDonorSectionTitle}>Available Donors</Text>
+                <Text style={styles.findDonorLabel}>{visibleDonors.length} compatible donors found near you</Text>
+              </View>
+              <Text style={styles.updatedText}>Updated just now</Text>
+            </View>
+
+            {visibleDonors.length > 0 ? (
+              visibleDonors.map((donor) => (
+                <View key={donor.name} style={styles.donorCard}>
+                  <View style={styles.donorHeader}>
+                    <View style={styles.donorAvatar}>
+                      <MaterialCommunityIcons name="account" size={28} color="#59413e" />
+                      <View style={styles.onlineDot} />
+                    </View>
+                    <View style={styles.donorInfo}>
+                      <View style={styles.donorNameRow}>
+                        <Text style={styles.donorName}>{donor.name}</Text>
+                        <Text style={styles.donorBlood}>{donor.blood}</Text>
+                      </View>
+                      <Text style={styles.donorMeta}>{donor.distance}</Text>
+                      <Text style={styles.donorMeta}>Last donated: {donor.lastDonation}</Text>
+                    </View>
+                    <Text style={styles.availableBadge}>Available Now</Text>
+                  </View>
+                  <View style={styles.privacyNotice}>
+                    <MaterialCommunityIcons name="lock" size={18} color="#8d706d" />
+                    <Text style={styles.privacyText}>Exact address hidden. Location details are shared only after donor acceptance.</Text>
+                  </View>
+                  <View style={styles.donorActions}>
+                    <Pressable style={styles.donorActionButton} onPress={() => Alert.alert('Call Donor', 'Calling is available after verified contact details are shared.')}>
+                      <MaterialCommunityIcons name="phone" size={18} color="#191c1e" />
+                      <Text style={styles.donorActionText}>Call</Text>
+                    </Pressable>
+                    <Pressable style={styles.donorActionButton} onPress={() => Alert.alert('WhatsApp', 'WhatsApp contact is available after donor acceptance.')}>
+                      <MaterialCommunityIcons name="message-text" size={18} color="#191c1e" />
+                      <Text style={styles.donorActionText}>WhatsApp</Text>
+                    </Pressable>
+                    <Pressable style={styles.donorRequestButton} onPress={() => requestDonor(donor)}>
+                      <Text style={styles.donorRequestText}>Request</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.donorEmptyState}>
+                <View style={styles.donorEmptyIcon}>
+                  <MaterialCommunityIcons name="water" size={32} color="#760009" />
+                </View>
+                <Text style={styles.emptyStateTitle}>No compatible donors nearby</Text>
+                <Text style={styles.emptyStateText}>Try increasing your search radius or selecting another location.</Text>
+                <Pressable
+                  style={styles.donorRequestButtonFull}
+                  onPress={() => {
+                    setRadius('25 km');
+                    setShowEmptyState(false);
+                  }}
+                >
+                  <Text style={styles.donorRequestText}>Increase Search Radius to 25 km</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+
+      <View style={styles.bottomNav}>
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
+          <MaterialCommunityIcons name="home" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Home</Text>
+        </Pressable>
+        <Pressable style={styles.bottomNavItem} onPress={onRequests} accessibilityLabel="Requests">
+          <MaterialCommunityIcons name="water" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Requests</Text>
+        </Pressable>
+        <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile">
+          <MaterialCommunityIcons name="account" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Profile</Text>
         </Pressable>
       </View>
     </View>
@@ -1397,6 +1690,479 @@ const styles = StyleSheet.create({
     color: '#760009',
     fontWeight: '700',
   },
+  findDonorScreen: {
+    flex: 1,
+    backgroundColor: '#f7f9fb',
+  },
+  findDonorHeader: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  findDonorHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  findDonorHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  findDonorHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#eceef0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  findDonorScroll: {
+    flex: 1,
+  },
+  findDonorContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 112,
+  },
+  findDonorSubtitle: {
+    color: '#59413e',
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 20,
+  },
+  findDonorCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#991b1b',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  findDonorLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  findDonorLocationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  findDonorIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ffdad6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  findDonorLabel: {
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  findDonorLocation: {
+    color: '#191c1e',
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: '600',
+  },
+  findDonorChange: {
+    color: '#760009',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  findDonorMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  findDonorMeta: {
+    color: '#59413e',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  findDonorActive: {
+    color: '#760009',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#eceef0',
+  },
+  filterChipSelected: {
+    backgroundColor: '#991b1b',
+  },
+  filterChipText: {
+    color: '#191c1e',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  filterChipTextSelected: {
+    color: '#ffaaa1',
+    fontWeight: '700',
+  },
+  findDonorSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  findDonorSectionTitle: {
+    color: '#191c1e',
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: '600',
+  },
+  bloodChoiceRow: {
+    gap: 10,
+    paddingBottom: 8,
+  },
+  bloodChoice: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  bloodChoiceSelected: {
+    backgroundColor: '#991b1b',
+  },
+  bloodChoiceText: {
+    color: '#191c1e',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '600',
+  },
+  bloodChoiceTextSelected: {
+    color: '#ffaaa1',
+  },
+  compatibilityNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f8dcdc',
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  compatibilityText: {
+    flex: 1,
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  smallFilter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#ffffff',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexShrink: 1,
+  },
+  smallFilterText: {
+    color: '#191c1e',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  findDonorResults: {
+    marginBottom: 20,
+  },
+  findDonorResultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  updatedText: {
+    color: '#760009',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  donorCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#991b1b',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  donorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  donorAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#eceef0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  onlineDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  donorInfo: {
+    flex: 1,
+  },
+  donorNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  donorName: {
+    color: '#191c1e',
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: '600',
+  },
+  donorBlood: {
+    color: '#ffaaa1',
+    backgroundColor: '#991b1b',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  donorMeta: {
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  availableBadge: {
+    alignSelf: 'flex-start',
+    color: '#760009',
+    backgroundColor: '#ffdad6',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
+  privacyNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f2f4f6',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 14,
+  },
+  privacyText: {
+    flex: 1,
+    color: '#59413e',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  donorActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  donorActionButton: {
+    flex: 1,
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: 12,
+    backgroundColor: '#eceef0',
+  },
+  donorActionText: {
+    color: '#191c1e',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  donorRequestButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#991b1b',
+  },
+  donorRequestText: {
+    color: '#ffaaa1',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  donorEmptyState: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  donorEmptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ffdad6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  donorRequestButtonFull: {
+    width: '100%',
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: '#991b1b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingHorizontal: 12,
+  },
+  acceptedCard: {
+    backgroundColor: '#f8dcdc',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+  },
+  acceptedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  acceptedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmedBadge: {
+    color: '#166534',
+    backgroundColor: '#dcfce7',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  acceptedText: {
+    color: '#191c1e',
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 14,
+  },
+  acceptedActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  acceptedAction: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    minHeight: 64,
+  },
+  acceptedActionText: {
+    color: '#191c1e',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  locationPrivacyBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f2f4f6',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 14,
+  },
+  locationPrivacyText: {
+    flex: 1,
+    color: '#59413e',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  pickupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 12,
+  },
+  pickupTextWrap: {
+    flex: 1,
+  },
+  pickupTitle: {
+    color: '#191c1e',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  requestPickupButton: {
+    backgroundColor: '#991b1b',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  requestPickupText: {
+    color: '#ffaaa1',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
   requestsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1438,12 +2204,13 @@ const styles = StyleSheet.create({
 });
 
 export default function App() {
-  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'profile'>('home');
+  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'profile' | 'findDonor'>('home');
 
   if (screen === 'home') {
     return (
       <HomeScreen
         onRequestBlood={() => setScreen('request')}
+        onFindDonor={() => setScreen('findDonor')}
         onRequests={() => setScreen('requests')}
         onProfile={() => setScreen('profile')}
       />
@@ -1463,6 +2230,17 @@ export default function App() {
 
   if (screen === 'requests') {
     return <RequestsScreen onHome={() => setScreen('home')} onProfile={() => setScreen('profile')} />;
+  }
+
+  if (screen === 'findDonor') {
+    return (
+      <FindDonorScreen
+        onBack={() => setScreen('home')}
+        onHome={() => setScreen('home')}
+        onRequests={() => setScreen('requests')}
+        onProfile={() => setScreen('profile')}
+      />
+    );
   }
 
   return <ProfileScreen onHome={() => setScreen('home')} onRequests={() => setScreen('requests')} />;
