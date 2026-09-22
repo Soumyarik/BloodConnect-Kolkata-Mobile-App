@@ -20,7 +20,15 @@ const heroImage =
 const logoImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuCBSk6a55NuwAytbnzJJPnsRtAfy8KaH9s2AX5xnGC1tMryE2hrKW2bKPuZHfxU-LghrmXOvWZSoOzRatbsAAy6w_4p3XBtBj1tf10-TlKq9uDbbHHAIFEFx7xMF-d7AhjHMHZylGhaGwlmPmOhnzvpw7VRog9pXWIQPdOpq5H2dHA0ng97Ly18mZRdGDB1N0zlbdWpM89e6lcz6m2U-V4Y7BIYzhS8fo4qKCG4YdXJ5jy8apzX0Ebj_A';
 
-function HomeScreen({ onRequestBlood }: { onRequestBlood: () => void }) {
+function HomeScreen({
+  onRequestBlood,
+  onRequests,
+  onProfile,
+}: {
+  onRequestBlood: () => void;
+  onRequests: () => void;
+  onProfile: () => void;
+}) {
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
@@ -140,12 +148,12 @@ function HomeScreen({ onRequestBlood }: { onRequestBlood: () => void }) {
           <Text style={[styles.tabText, styles.tabTextActive]}>Home</Text>
         </Pressable>
 
-        <Pressable style={styles.tabItem} accessibilityLabel="Requests">
+        <Pressable style={styles.tabItem} onPress={onRequests} accessibilityLabel="Requests">
           <MaterialCommunityIcons name="water" size={20} color="#59413e" />
           <Text style={styles.tabText}>Requests</Text>
         </Pressable>
 
-        <Pressable style={styles.tabItem} accessibilityLabel="Profile">
+        <Pressable style={styles.tabItem} onPress={onProfile} accessibilityLabel="Profile">
           <MaterialCommunityIcons name="account" size={20} color="#59413e" />
           <Text style={styles.tabText}>Profile</Text>
         </Pressable>
@@ -154,7 +162,103 @@ function HomeScreen({ onRequestBlood }: { onRequestBlood: () => void }) {
   );
 }
 
-function RequestBloodScreen({ onBack }: { onBack: () => void }) {
+function RequestsScreen({ onHome, onProfile }: { onHome: () => void; onProfile: () => void }) {
+  return (
+    <View style={styles.requestScreen}>
+      <StatusBar style="dark" />
+
+      <View style={styles.requestsHeader}>
+        <Pressable style={styles.requestBackButton} onPress={onHome} accessibilityLabel="Go back to home">
+          <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
+        </Pressable>
+        <Text style={styles.requestTitle}>Blood Requests</Text>
+        <View style={styles.requestHeaderIcon}>
+          <MaterialCommunityIcons name="water" size={20} color="#760009" />
+        </View>
+      </View>
+
+      <View style={styles.emptyState}>
+        <View style={styles.emptyStateIcon}>
+          <MaterialCommunityIcons name="water" size={42} color="#760009" />
+        </View>
+        <Text style={styles.emptyStateTitle}>No Blood Requests Yet</Text>
+        <Text style={styles.emptyStateText}>Your active blood requests will appear here.</Text>
+      </View>
+
+      <View style={styles.bottomNav}>
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
+          <MaterialCommunityIcons name="home" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Home</Text>
+        </Pressable>
+
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Requests">
+          <MaterialCommunityIcons name="water" size={20} color="#760009" />
+          <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Requests</Text>
+        </Pressable>
+
+        <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile">
+          <MaterialCommunityIcons name="account" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Profile</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests: () => void }) {
+  return (
+    <View style={styles.requestScreen}>
+      <StatusBar style="dark" />
+
+      <View style={styles.requestsHeader}>
+        <Pressable style={styles.requestBackButton} onPress={onHome} accessibilityLabel="Go back to home">
+          <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
+        </Pressable>
+        <Text style={styles.requestTitle}>Profile</Text>
+        <View style={styles.requestHeaderIcon}>
+          <MaterialCommunityIcons name="account" size={20} color="#760009" />
+        </View>
+      </View>
+
+      <View style={styles.emptyState}>
+        <View style={styles.emptyStateIcon}>
+          <MaterialCommunityIcons name="account-outline" size={42} color="#760009" />
+        </View>
+        <Text style={styles.emptyStateTitle}>Profile</Text>
+        <Text style={styles.emptyStateText}>Profile features are coming soon.</Text>
+      </View>
+
+      <View style={styles.bottomNav}>
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
+          <MaterialCommunityIcons name="home" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Home</Text>
+        </Pressable>
+
+        <Pressable style={styles.bottomNavItem} onPress={onRequests} accessibilityLabel="Requests">
+          <MaterialCommunityIcons name="water" size={20} color="#59413e" />
+          <Text style={styles.bottomNavText}>Requests</Text>
+        </Pressable>
+
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Profile">
+          <MaterialCommunityIcons name="account" size={20} color="#760009" />
+          <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Profile</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function RequestBloodScreen({
+  onBack,
+  onHome,
+  onRequests,
+  onProfile,
+}: {
+  onBack: () => void;
+  onHome: () => void;
+  onRequests: () => void;
+  onProfile: () => void;
+}) {
   const [selectedBlood, setSelectedBlood] = useState('O+');
   const [units, setUnits] = useState(2);
   const [patientName, setPatientName] = useState('');
@@ -437,17 +541,17 @@ function RequestBloodScreen({ onBack }: { onBack: () => void }) {
       </KeyboardAvoidingView>
 
       <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} accessibilityLabel="Home">
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
 
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Requests">
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={onRequests} accessibilityLabel="Requests">
           <MaterialCommunityIcons name="water" size={20} color="#760009" />
           <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Requests</Text>
         </Pressable>
 
-        <Pressable style={styles.bottomNavItem} accessibilityLabel="Profile">
+        <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile">
           <MaterialCommunityIcons name="account" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Profile</Text>
         </Pressable>
@@ -1293,14 +1397,73 @@ const styles = StyleSheet.create({
     color: '#760009',
     fontWeight: '700',
   },
+  requestsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingBottom: 96,
+  },
+  emptyStateIcon: {
+    width: 88,
+    height: 88,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffdad6',
+    marginBottom: 20,
+  },
+  emptyStateTitle: {
+    color: '#191c1e',
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    color: '#59413e',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
 });
 
 export default function App() {
-  const [screen, setScreen] = useState<'home' | 'request'>('home');
+  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'profile'>('home');
 
-  return screen === 'home' ? (
-    <HomeScreen onRequestBlood={() => setScreen('request')} />
-  ) : (
-    <RequestBloodScreen onBack={() => setScreen('home')} />
-  );
+  if (screen === 'home') {
+    return (
+      <HomeScreen
+        onRequestBlood={() => setScreen('request')}
+        onRequests={() => setScreen('requests')}
+        onProfile={() => setScreen('profile')}
+      />
+    );
+  }
+
+  if (screen === 'request') {
+    return (
+      <RequestBloodScreen
+        onBack={() => setScreen('home')}
+        onHome={() => setScreen('home')}
+        onRequests={() => setScreen('requests')}
+        onProfile={() => setScreen('profile')}
+      />
+    );
+  }
+
+  if (screen === 'requests') {
+    return <RequestsScreen onHome={() => setScreen('home')} onProfile={() => setScreen('profile')} />;
+  }
+
+  return <ProfileScreen onHome={() => setScreen('home')} onRequests={() => setScreen('requests')} />;
 }
