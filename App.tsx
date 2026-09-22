@@ -126,7 +126,7 @@ function HomeScreen({
 
           <View style={styles.requestCard}>
             <View style={styles.requestBody}>
-              <View style={styles.bloodBadge}>O+</View>
+              <Text style={styles.bloodBadge}>O+</Text>
 
               <View style={styles.requestInfo}>
                 <View style={styles.statusRow}>
@@ -460,7 +460,91 @@ function FindDonorScreen({
   );
 }
 
-function RequestsScreen({ onHome, onProfile }: { onHome: () => void; onProfile: () => void }) {
+type BloodRequest = {
+  id: string;
+  patientName: string;
+  bloodGroup: string;
+  unitsRequired: number;
+  hospitalName: string;
+  hospitalAddress: string;
+  city: string;
+  area: string;
+  requiredDate: string | null;
+  requiredTime: string | null;
+  status: string;
+  isEmergency: boolean;
+  contactPhone: string;
+};
+
+type BloodRequestRow = {
+  id: string;
+  patient_name: string;
+  blood_group: string;
+  units_required: number;
+  hospital_name: string;
+  hospital_address: string | null;
+  city: string;
+  area: string | null;
+  required_date: string | null;
+  required_time: string | null;
+  status: string;
+  is_emergency: boolean;
+  contact_phone: string;
+};
+
+const toBloodRequest = (row: BloodRequestRow): BloodRequest => ({
+  id: row.id,
+  patientName: row.patient_name,
+  bloodGroup: row.blood_group,
+  unitsRequired: row.units_required,
+  hospitalName: row.hospital_name,
+  hospitalAddress: row.hospital_address || '',
+  city: row.city,
+  area: row.area || '',
+  requiredDate: row.required_date,
+  requiredTime: row.required_time,
+  status: row.status,
+  isEmergency: row.is_emergency,
+  contactPhone: row.contact_phone,
+});
+
+const formatRequestDeadline = (request: BloodRequest) => {
+  if (!request.requiredDate && !request.requiredTime) return 'As soon as possible';
+  return [request.requiredDate, request.requiredTime].filter(Boolean).join(', ');
+};
+
+function RequestsScreen({ onHome, onProfile, onRequestDetails }: { onHome: () => void; onProfile: () => void; onRequestDetails: (requestId: string) => void }) {
+  const [requests, setRequests] = useState<BloodRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    const loadRequests = async () => {
+      setLoading(true);
+      setErrorMessage('');
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        if (mounted) {
+          setErrorMessage(userError?.message || 'You must be signed in to view requests.');
+          setLoading(false);
+        }
+        return;
+      }
+      const { data, error } = await supabase
+        .from('blood_requests')
+        .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
+        .eq('requester_id', userData.user.id)
+        .order('created_at', { ascending: false });
+      if (!mounted) return;
+      if (error) setErrorMessage(`Unable to load requests: ${error.message}`);
+      else setRequests((data as BloodRequestRow[]).map(toBloodRequest));
+      setLoading(false);
+    };
+    void loadRequests();
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <View style={styles.requestScreen}>
       <StatusBar style="dark" />
@@ -475,13 +559,38 @@ function RequestsScreen({ onHome, onProfile }: { onHome: () => void; onProfile: 
         </View>
       </View>
 
-      <View style={styles.emptyState}>
-        <View style={styles.emptyStateIcon}>
-          <MaterialCommunityIcons name="water" size={42} color="#760009" />
+      {loading ? (
+        <Text style={styles.authLoadingText}>Loading requests...</Text>
+      ) : errorMessage ? (
+        <Text style={styles.profileErrorText}>{errorMessage}</Text>
+      ) : requests.length > 0 ? (
+        requests.map((request) => (
+        <Pressable key={request.id} style={styles.mockRequestCard} onPress={() => onRequestDetails(request.id)} accessibilityLabel={`Open ${request.patientName} blood request`}>
+          <View style={styles.mockRequestTopRow}>
+            <View style={styles.mockRequestBloodBadge}><Text style={styles.mockRequestBloodText}>{request.bloodGroup}</Text></View>
+            <View style={styles.mockRequestCopy}>
+              <View style={styles.mockRequestStatusRow}>
+                {request.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
+                <Text style={styles.openStatusBadge}>{request.status.toUpperCase()}</Text>
+              </View>
+              <Text style={styles.mockRequestPatient}>{request.patientName}</Text>
+              <Text style={styles.findDonorMeta}>{request.unitsRequired} units required - {request.hospitalName}</Text>
+              <Text style={styles.findDonorMeta}>{[request.area, request.city].filter(Boolean).join(', ')} - {formatRequestDeadline(request)}</Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color="#8d706d" />
+          </View>
+          <Text style={styles.mockRequestHint}>Tap to view request details</Text>
+        </Pressable>
+        ))
+      ) : (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyStateIcon}>
+            <MaterialCommunityIcons name="water" size={42} color="#760009" />
+          </View>
+          <Text style={styles.emptyStateTitle}>No Blood Requests Yet</Text>
+          <Text style={styles.emptyStateText}>Your active blood requests will appear here.</Text>
         </View>
-        <Text style={styles.emptyStateTitle}>No Blood Requests Yet</Text>
-        <Text style={styles.emptyStateText}>Your active blood requests will appear here.</Text>
-      </View>
+      )}
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
@@ -498,6 +607,178 @@ function RequestsScreen({ onHome, onProfile }: { onHome: () => void; onProfile: 
           <MaterialCommunityIcons name="account" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Profile</Text>
         </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function BloodRequestDetailsScreen({
+  onBack,
+  onHome,
+  onRequests,
+  onProfile,
+  requestId,
+}: {
+  onBack: () => void;
+  onHome: () => void;
+  onRequests: () => void;
+  onProfile: () => void;
+  requestId: string;
+}) {
+  const [request, setRequest] = useState<BloodRequest | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    const loadRequest = async () => {
+      setLoading(true);
+      setErrorMessage('');
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        if (mounted) { setErrorMessage(userError?.message || 'You must be signed in to view this request.'); setLoading(false); }
+        return;
+      }
+      const { data, error } = await supabase
+        .from('blood_requests')
+        .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
+        .eq('id', requestId)
+        .eq('requester_id', userData.user.id)
+        .maybeSingle();
+      if (!mounted) return;
+      if (error) setErrorMessage(`Unable to load request: ${error.message}`);
+      else if (!data) setErrorMessage('This request could not be found or is not owned by your account.');
+      else setRequest(toBloodRequest(data as BloodRequestRow));
+      setLoading(false);
+    };
+    void loadRequest();
+    return () => { mounted = false; };
+  }, [requestId]);
+
+  const cancelRequest = async () => {
+    if (!request) return;
+    const { error } = await supabase.from('blood_requests').update({ status: 'cancelled' }).eq('id', request.id);
+    if (error) {
+      setErrorMessage(`Unable to cancel request: ${error.message}`);
+      return;
+    }
+    setRequest({ ...request, status: 'cancelled' });
+  };
+
+  if (loading) {
+    return <View style={styles.detailsScreen}><Text style={styles.authLoadingText}>Loading request...</Text></View>;
+  }
+
+  if (!request) {
+    return <View style={styles.detailsScreen}><Text style={styles.profileErrorText}>{errorMessage || 'Unable to load request.'}</Text><Pressable style={styles.profilePrimaryButtonSmall} onPress={onBack}><Text style={styles.profilePrimaryButtonText}>Back to Requests</Text></Pressable></View>;
+  }
+
+  return (
+    <View style={styles.detailsScreen}>
+      <StatusBar style="dark" />
+
+      <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.detailsHeader}>
+          <Pressable style={styles.detailsIconButton} onPress={onBack} accessibilityLabel="Go back to requests">
+            <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
+          </Pressable>
+          <Text style={styles.detailsTitle}>Blood Request Details</Text>
+          <Pressable style={styles.detailsIconButton} onPress={() => Alert.alert('More options', 'More request options will be connected later.')} accessibilityLabel="More options">
+            <MaterialCommunityIcons name="dots-vertical" size={22} color="#191c1e" />
+          </Pressable>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsTopRow}>
+            <View style={styles.detailsBadgeRow}>
+              <Text style={styles.urgentStatusBadge}>URGENT</Text>
+              <Text style={styles.openStatusBadge}>{request.status.toUpperCase()}</Text>
+            </View>
+            <View style={styles.detailsBloodBadge}>
+              <MaterialCommunityIcons name="water" size={20} color="#760009" />
+              <Text style={styles.detailsBloodText}>{request.bloodGroup}</Text>
+            </View>
+          </View>
+          <Text style={styles.detailsHeading}>Urgent Blood Request</Text>
+          <Text style={styles.detailsMuted}>Immediate donor match requested for urgent transfusion at Kolkata center.</Text>
+          <View style={styles.detailsMetricBar}>
+            <View style={styles.detailsMetric}>
+              <MaterialCommunityIcons name="water" size={20} color="#760009" />
+              <View><Text style={styles.detailsLabel}>Required</Text><Text style={styles.detailsMetricValue}>{request.unitsRequired} Units</Text></View>
+            </View>
+            <View style={styles.detailsMetric}>
+              <MaterialCommunityIcons name="clock-outline" size={20} color="#760009" />
+              <View><Text style={styles.detailsLabel}>Deadline</Text><Text style={styles.detailsMetricValue}>{formatRequestDeadline(request)}</Text></View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="account-alert" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Patient Information</Text></View>
+          <View style={styles.detailsGrid}>
+            <View><Text style={styles.detailsLabel}>Patient Name</Text><Text style={styles.detailsValue}>{request.patientName}</Text></View>
+            <View><Text style={styles.detailsLabel}>Blood Group</Text><Text style={styles.detailsAccentValue}>O Positive ({request.bloodGroup})</Text></View>
+            <View><Text style={styles.detailsLabel}>Units Required</Text><Text style={styles.detailsValue}>{request.unitsRequired} Units</Text></View>
+            <View><Text style={styles.detailsLabel}>Required By</Text><Text style={styles.detailsValue}>{formatRequestDeadline(request)}</Text></View>
+          </View>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="hospital" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Hospital Information</Text></View>
+          <Text style={styles.detailsHospitalName}>{request.hospitalName}</Text>
+          <Text style={styles.detailsMuted}><MaterialCommunityIcons name="map-marker" size={16} color="#760009" /> {[request.area, request.city].filter(Boolean).join(', ')}</Text>
+          <View style={styles.approxLocationBox}><MaterialCommunityIcons name="map-marker-radius" size={24} color="#760009" /><Text style={styles.detailsMuted}>Approximate hospital location: Dhakuria, South Kolkata</Text></View>
+          <Pressable style={styles.detailsSecondaryButton} onPress={() => Alert.alert('Hospital Location', 'A real map will be connected later.')}>
+            <MaterialCommunityIcons name="map-outline" size={18} color="#760009" /><Text style={styles.detailsSecondaryText}>View Hospital Location</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="timeline" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Request Timeline</Text><Text style={styles.stepBadge}>Step 3 of 5</Text></View>
+          {[
+            ['check', 'Request Created', 'Today at 10:30 AM', true],
+            ['check', 'Donor Responses (3)', 'Matched with nearby Kolkata donors', true],
+            ['heart', 'Donor Accepted', 'Rahul S. confirmed immediate availability', true],
+            ['circle-outline', 'Blood Collected', 'Pending hospital delivery', false],
+            ['circle-outline', 'Request Fulfilled', 'Verification and safe transfusion completion', false],
+          ].map(([icon, title, subtitle, active], index) => (
+            <View key={title as string} style={styles.timelineRow}>
+              <View style={[styles.timelineIcon, active ? styles.timelineIconActive : styles.timelineIconPending]}><MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={15} color={active ? '#ffffff' : '#59413e'} /></View>
+              <View style={[styles.timelineCopy, index === 2 && styles.timelineActiveCopy]}><Text style={[styles.detailsValue, index === 2 && styles.detailsAccentValue]}>{title as string}</Text><Text style={styles.detailsLabel}>{subtitle as string}</Text></View>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsSectionHeading}><Text style={styles.detailsSectionTitle}>Donor Responses (3)</Text><Text style={styles.activeMatchBadge}>Active Match</Text></View>
+          {[
+            ['RS', 'Rahul S.', '2.4 km away - Available Now', 'Accepted', true],
+            ['AM', 'Ananya M.', '4.1 km away - Available Now', 'Pending', false],
+            ['AK', 'Amit K.', '5.8 km away - Unavailable', 'Declined', false],
+          ].map(([initials, name, distance, status, accepted]) => (
+            <View key={name as string} style={styles.donorResponseRow}>
+              <View style={styles.donorInitials}><Text style={styles.donorInitialsText}>{initials as string}</Text></View>
+              <View style={styles.donorResponseInfo}><View style={styles.donorNameRow}><Text style={styles.detailsValue}>{name as string}</Text><Text style={styles.responseBlood}>O+</Text></View><Text style={styles.detailsLabel}>{distance as string}</Text></View>
+              <Text style={[styles.responseStatus, accepted && styles.responseAccepted]}>{status as string}</Text>
+            </View>
+          ))}
+        </View>
+
+        <Pressable style={styles.detailsPrimaryButton} onPress={() => Alert.alert('Donate', 'Your donor response will be connected to Supabase later.')}><MaterialCommunityIcons name="hand-heart" size={22} color="#ffffff" /><Text style={styles.detailsPrimaryText}>I Can Donate</Text></Pressable>
+        <Pressable style={styles.detailsSecondaryButton} onPress={() => Alert.alert('Donor Responses', 'Donor response actions will be connected later.')}><MaterialCommunityIcons name="account-group" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text></Pressable>
+        <View style={styles.detailsButtonRow}>
+          <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Edit Request', 'Request editing will be connected later.')}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
+          <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Cancel Request', 'Are you sure you want to cancel this request?', [{ text: 'Keep Open', style: 'cancel' }, { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }])}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
+        </View>
+
+        <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="truck-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>Hospital Pickup Information</Text><Text style={styles.detailsMuted}>Pickup information is available only for verified hospitals or authorized partners in Kolkata.</Text></View></View>
+        <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="shield-check-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>BloodConnect Privacy Guarantee</Text><Text style={styles.detailsMuted}>Exact donor location and personal contact information are shared only with appropriate consent.</Text></View></View>
+      </ScrollView>
+
+      <View style={styles.bottomNav}>
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home"><MaterialCommunityIcons name="home" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Home</Text></Pressable>
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={onRequests} accessibilityLabel="Requests"><MaterialCommunityIcons name="water" size={20} color="#760009" /><Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Requests</Text></Pressable>
+        <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile"><MaterialCommunityIcons name="account" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Profile</Text></Pressable>
       </View>
     </View>
   );
@@ -551,6 +832,7 @@ function ProfileScreen({
   const [saving, setSaving] = useState(false);
   const [availableToDonate, setAvailableToDonate] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [logoutVisible, setLogoutVisible] = useState(false);
 
   const loadProfile = async () => {
     setProfileLoading(true);
@@ -926,26 +1208,7 @@ function ProfileScreen({
           ))}
         </View>
 
-        <Pressable style={styles.profileLogoutButton} onPress={() => Alert.alert('Log Out', 'Are you sure you want to log out?', [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Log Out',
-            style: 'destructive',
-            onPress: () => {
-              setProfile({
-                name: 'Aritra Sen',
-                phone: '',
-                bloodGroup: 'O+',
-                dateOfBirth: '',
-                gender: '',
-                city: 'Kolkata',
-                area: 'West Bengal',
-                donorAvailable: false,
-              });
-              void onSignOut();
-            },
-          },
-        ])}>
+        <Pressable style={styles.profileLogoutButton} onPress={() => setLogoutVisible(true)}>
           <MaterialCommunityIcons name="logout" size={18} color="#ba1a1a" />
           <Text style={styles.profileLogoutText}>Log Out</Text>
         </Pressable>
@@ -1071,6 +1334,35 @@ function ProfileScreen({
         </View>
       </Modal>
 
+      <Modal visible={logoutVisible} transparent animationType="fade" onRequestClose={() => setLogoutVisible(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Log Out</Text>
+            <Text style={styles.profileMutedText}>Are you sure you want to log out?</Text>
+            {profileError ? <Text style={styles.profileErrorText}>{profileError}</Text> : null}
+            <View style={styles.profileModalActions}>
+              <Pressable style={styles.profileModalCancel} onPress={() => setLogoutVisible(false)}>
+                <Text style={styles.profileModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.profileModalSave}
+                onPress={async () => {
+                  setProfileError('');
+                  try {
+                    await onSignOut();
+                    setLogoutVisible(false);
+                  } catch (error) {
+                    setProfileError(`Unable to log out: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                  }
+                }}
+              >
+                <Text style={styles.profileModalSaveText}>Log Out</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
@@ -1102,6 +1394,7 @@ function RequestBloodScreen({
   onRequests: () => void;
   onProfile: () => void;
 }) {
+  const { user } = useAuth();
   const [selectedBlood, setSelectedBlood] = useState('O+');
   const [units, setUnits] = useState(2);
   const [patientName, setPatientName] = useState('');
@@ -1109,14 +1402,56 @@ function RequestBloodScreen({
   const [location, setLocation] = useState('Kolkata, West Bengal');
   const [phone, setPhone] = useState('');
   const [emergencyMode, setEmergencyMode] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSubmit = () => {
-    if (!patientName.trim() || !hospitalName.trim() || !phone.trim()) {
+  const handleSubmit = async () => {
+    if (!patientName.trim() || !hospitalName.trim() || !location.trim() || !phone.trim()) {
       Alert.alert('Missing details', 'Please complete the patient, hospital and contact information.');
       return;
     }
 
-    Alert.alert('Request submitted', `Your ${selectedBlood} blood request for ${patientName.trim()} has been recorded.`);
+    if (!user) {
+      setErrorMessage('You must be signed in to create a blood request.');
+      return;
+    }
+
+    setSaving(true);
+    setErrorMessage('');
+    const locationParts = location.split(',').map((part) => part.trim()).filter(Boolean);
+    const { error } = await supabase.from('blood_requests').insert({
+      requester_id: user.id,
+      patient_name: patientName.trim(),
+      blood_group: selectedBlood,
+      units_required: units,
+      hospital_name: hospitalName.trim(),
+      hospital_address: location.trim(),
+      city: locationParts[0] || location.trim(),
+      area: locationParts.slice(1).join(', ') || null,
+      latitude: null,
+      longitude: null,
+      required_date: null,
+      required_time: null,
+      is_emergency: emergencyMode,
+      contact_phone: phone.trim(),
+      status: 'open',
+    });
+
+    if (error) {
+      setErrorMessage(`Unable to submit blood request: ${error.message}`);
+      setSaving(false);
+      return;
+    }
+
+    setPatientName('');
+    setHospitalName('');
+    setLocation('Kolkata, West Bengal');
+    setPhone('');
+    setSelectedBlood('O+');
+    setUnits(2);
+    setEmergencyMode(true);
+    setSaving(false);
+    Alert.alert('Request submitted', 'Your blood request has been saved.', [{ text: 'View Requests', onPress: onRequests }]);
   };
 
   return (
@@ -1142,6 +1477,7 @@ function RequestBloodScreen({
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 100 }}
         >
+          {errorMessage ? <Text style={styles.profileErrorText}>{errorMessage}</Text> : null}
           <View style={styles.stepRow}>
             <View style={styles.stepItem}>
               <View style={styles.stepDot} />
@@ -1373,7 +1709,7 @@ function RequestBloodScreen({
           <View style={styles.submitWrap}>
             <Pressable style={styles.submitButton} onPress={handleSubmit}>
               <MaterialCommunityIcons name="send" size={20} color="#ffffff" />
-              <Text style={styles.submitButtonText}>Submit Blood Request</Text>
+              <Text style={styles.submitButtonText}>{saving ? 'Submitting...' : 'Submit Blood Request'}</Text>
             </Pressable>
 
             <Text style={styles.infoNote}>
@@ -2680,6 +3016,57 @@ const styles = StyleSheet.create({
   profileLogoutButton: { minHeight: 46, borderRadius: 999, borderWidth: 1, borderColor: '#ba1a1a', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   profileLogoutText: { color: '#ba1a1a', fontSize: 14, lineHeight: 20, fontWeight: '600' },
   profileErrorText: { color: '#ba1a1a', backgroundColor: '#ffdad6', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 18 },
+  detailsScreen: { flex: 1, backgroundColor: '#f7f9fb' },
+  detailsScroll: { flex: 1 },
+  detailsContent: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 112, gap: 14 },
+  detailsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  detailsIconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', elevation: 1 },
+  detailsTitle: { color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  detailsCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 18, shadowColor: '#991b1b', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  detailsTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  detailsBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  urgentStatusBadge: { color: '#93000a', backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, fontSize: 11, lineHeight: 16, fontWeight: '700' },
+  openStatusBadge: { color: '#59413e', backgroundColor: '#eceef0', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  detailsBloodBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  detailsBloodText: { color: '#760009', fontSize: 18, lineHeight: 24, fontWeight: '700' },
+  detailsHeading: { color: '#191c1e', fontSize: 24, lineHeight: 32, fontWeight: '600', marginBottom: 4 },
+  detailsMuted: { color: '#59413e', fontSize: 13, lineHeight: 19 },
+  detailsMetricBar: { flexDirection: 'row', gap: 12, backgroundColor: '#f2f4f6', borderRadius: 14, padding: 12, marginTop: 16 },
+  detailsMetric: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  detailsLabel: { color: '#59413e', fontSize: 11, lineHeight: 16 },
+  detailsMetricValue: { color: '#191c1e', fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  detailsSectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  detailsSectionTitle: { flex: 1, color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  detailsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+  detailsValue: { color: '#191c1e', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  detailsAccentValue: { color: '#760009', fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  detailsHospitalName: { color: '#191c1e', fontSize: 18, lineHeight: 26, fontWeight: '600', marginBottom: 4 },
+  approxLocationBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f2f4f6', borderRadius: 12, padding: 12, marginTop: 14, marginBottom: 12 },
+  detailsSecondaryButton: { minHeight: 44, borderRadius: 999, backgroundColor: '#f2f4f6', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  detailsSecondaryText: { color: '#760009', fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  stepBadge: { color: '#760009', backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, fontSize: 10, lineHeight: 15, fontWeight: '700' },
+  timelineRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
+  timelineIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  timelineIconActive: { backgroundColor: '#760009' },
+  timelineIconPending: { backgroundColor: '#e0e3e5' },
+  timelineCopy: { flex: 1, paddingTop: 3 },
+  timelineActiveCopy: { backgroundColor: '#f2f4f6', borderRadius: 10, padding: 8, marginTop: -4 },
+  activeMatchBadge: { color: '#760009', backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, fontSize: 10, lineHeight: 15, fontWeight: '700' },
+  donorResponseRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#f2f4f6', borderRadius: 12, padding: 10, marginBottom: 8 },
+  donorInitials: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#991b1b', alignItems: 'center', justifyContent: 'center' },
+  donorInitialsText: { color: '#ffaaa1', fontSize: 12, fontWeight: '700' },
+  donorResponseInfo: { flex: 1 },
+  responseBlood: { color: '#760009', backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2, fontSize: 10, fontWeight: '700' },
+  responseStatus: { color: '#59413e', backgroundColor: '#e0e3e5', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, fontSize: 10, fontWeight: '600' },
+  responseAccepted: { color: '#ffffff', backgroundColor: '#760009' },
+  detailsPrimaryButton: { minHeight: 54, borderRadius: 999, backgroundColor: '#760009', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  detailsPrimaryText: { color: '#ffffff', fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  detailsSecondaryDarkText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  detailsButtonRow: { flexDirection: 'row', gap: 10 },
+  detailsHalfButton: { flex: 1, minHeight: 44, borderRadius: 999, backgroundColor: '#ffffff', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, elevation: 1 },
+  cancelText: { color: '#ba1a1a', fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  detailsInfoBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#ffffff', borderRadius: 16, padding: 14, elevation: 1 },
+  detailsInfoCopy: { flex: 1, gap: 3 },
   profileModalBackdrop: { flex: 1, backgroundColor: 'rgba(25, 28, 30, 0.42)', justifyContent: 'flex-end' },
   profileModalCard: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 8 },
   profileModalTitle: { color: '#191c1e', fontSize: 24, lineHeight: 32, fontWeight: '600', marginBottom: 8 },
@@ -2832,11 +3219,19 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
   },
+  mockRequestCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 16, marginHorizontal: 24, shadowColor: '#991b1b', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  mockRequestTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  mockRequestBloodBadge: { width: 56, height: 56, borderRadius: 18, backgroundColor: '#ffdad6', alignItems: 'center', justifyContent: 'center' },
+  mockRequestBloodText: { color: '#760009', fontSize: 20, lineHeight: 28, fontWeight: '700' },
+  mockRequestCopy: { flex: 1, gap: 3 },
+  mockRequestStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mockRequestPatient: { color: '#191c1e', fontSize: 18, lineHeight: 26, fontWeight: '600' },
+  mockRequestHint: { color: '#760009', fontSize: 11, lineHeight: 16, fontWeight: '600', marginTop: 12 },
 });
 
 function AppContent() {
   const { session, loading, signIn, signUp, signOut } = useAuth();
-  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'profile' | 'findDonor'>('home');
+  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor'>('home');
 
   if (loading) {
     return (
@@ -2873,7 +3268,19 @@ function AppContent() {
   }
 
   if (screen === 'requests') {
-    return <RequestsScreen onHome={() => setScreen('home')} onProfile={() => setScreen('profile')} />;
+    return <RequestsScreen onHome={() => setScreen('home')} onProfile={() => setScreen('profile')} onRequestDetails={() => setScreen('requestDetails')} />;
+  }
+
+  if (screen === 'requestDetails') {
+    return (
+      <BloodRequestDetailsScreen
+        onBack={() => setScreen('requests')}
+        onHome={() => setScreen('home')}
+        onRequests={() => setScreen('requests')}
+        onProfile={() => setScreen('profile')}
+        request={mockBloodRequest}
+      />
+    );
   }
 
   if (screen === 'findDonor') {
@@ -2892,7 +3299,8 @@ function AppContent() {
       onHome={() => setScreen('home')}
       onRequests={() => setScreen('requests')}
       onSignOut={async () => {
-        await signOut();
+        const result = await signOut();
+        if (result.error) throw result.error;
         setScreen('home');
       }}
     />
