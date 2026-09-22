@@ -5,6 +5,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -498,28 +499,362 @@ function RequestsScreen({ onHome, onProfile }: { onHome: () => void; onProfile: 
   );
 }
 
+type ProfileData = {
+  name: string;
+  phone: string;
+  bloodGroup: string;
+  location: string;
+};
+
+type EmergencyContact = {
+  name: string;
+  phone: string;
+  relationship: string;
+};
+
+const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
 function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests: () => void }) {
+  const [availableToDonate, setAvailableToDonate] = useState(true);
+  const [profile, setProfile] = useState<ProfileData>({
+    name: 'Aritra Sen',
+    phone: '',
+    bloodGroup: 'O+',
+    location: 'Kolkata, West Bengal',
+  });
+  const [draftProfile, setDraftProfile] = useState(profile);
+  const [editProfileVisible, setEditProfileVisible] = useState(false);
+  const [emergencyContact, setEmergencyContact] = useState<EmergencyContact | null>(null);
+  const [draftContact, setDraftContact] = useState<EmergencyContact>({ name: '', phone: '', relationship: '' });
+  const [contactVisible, setContactVisible] = useState(false);
+
+  const openEditProfile = () => {
+    setDraftProfile(profile);
+    setEditProfileVisible(true);
+  };
+
+  const saveProfile = () => {
+    setProfile(draftProfile);
+    setEditProfileVisible(false);
+  };
+
+  const openEmergencyContact = () => {
+    setDraftContact(emergencyContact || { name: '', phone: '', relationship: '' });
+    setContactVisible(true);
+  };
+
+  const saveEmergencyContact = () => {
+    if (!draftContact.name.trim() || !draftContact.phone.trim() || !draftContact.relationship.trim()) {
+      Alert.alert('Missing details', 'Please complete all emergency contact fields.');
+      return;
+    }
+    setEmergencyContact(draftContact);
+    setContactVisible(false);
+  };
+
+  const showComingSoon = (title: string) => {
+    Alert.alert(title, 'Coming soon - this feature will be connected later.');
+  };
+
   return (
-    <View style={styles.requestScreen}>
+    <View style={styles.profileScreen}>
       <StatusBar style="dark" />
 
-      <View style={styles.requestsHeader}>
-        <Pressable style={styles.requestBackButton} onPress={onHome} accessibilityLabel="Go back to home">
-          <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
-        </Pressable>
-        <Text style={styles.requestTitle}>Profile</Text>
-        <View style={styles.requestHeaderIcon}>
-          <MaterialCommunityIcons name="account" size={20} color="#760009" />
+      <ScrollView
+        style={styles.profileScroll}
+        contentContainerStyle={styles.profileContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.profileHero}>
+          <View style={styles.profileAvatar}>
+            <MaterialCommunityIcons name="account" size={48} color="#59413e" />
+          </View>
+          <Text style={styles.profileName}>{profile.name}</Text>
+          <View style={styles.profileLocationRow}>
+            <MaterialCommunityIcons name="map-marker" size={16} color="#59413e" />
+            <Text style={styles.profileMutedText}>{profile.location}</Text>
+          </View>
+          <View style={styles.profileBadgeRow}>
+            <View style={styles.profileBloodBadge}>
+              <MaterialCommunityIcons name="water" size={16} color="#93000a" />
+              <Text style={styles.profileBloodText}>{profile.bloodGroup}</Text>
+            </View>
+            <View style={styles.profileAvailabilityBadge}>
+              <View style={styles.profileOnlineDot} />
+              <Text style={styles.profileAvailabilityText}>
+                {availableToDonate ? 'Available to Donate' : 'Currently Unavailable'}
+              </Text>
+            </View>
+          </View>
+          <Pressable style={styles.profileOutlineButton} onPress={openEditProfile}>
+            <MaterialCommunityIcons name="pencil-outline" size={18} color="#760009" />
+            <Text style={styles.profileOutlineButtonText}>Edit Profile</Text>
+          </Pressable>
         </View>
-      </View>
 
-      <View style={styles.emptyState}>
-        <View style={styles.emptyStateIcon}>
-          <MaterialCommunityIcons name="account-outline" size={42} color="#760009" />
+        <View style={styles.profileCard}>
+          <View style={styles.profileCardHeadingRow}>
+            <View style={styles.profileHeadingCopy}>
+              <Text style={styles.profileSectionTitle}>Donor Availability</Text>
+              <Text style={styles.profileMutedText}>Let people nearby know that you may be available to help.</Text>
+            </View>
+            <Switch
+              value={availableToDonate}
+              onValueChange={setAvailableToDonate}
+              trackColor={{ false: '#d9dfe4', true: '#760009' }}
+              thumbColor="#ffffff"
+            />
+          </View>
+          <Text style={styles.profileFinePrint}>You can change your availability anytime.</Text>
         </View>
-        <Text style={styles.emptyStateTitle}>Profile</Text>
-        <Text style={styles.emptyStateText}>Profile features are coming soon.</Text>
-      </View>
+
+        <View style={styles.profileCard}>
+          <Text style={styles.profileSectionTitle}>Blood Information</Text>
+          <View style={styles.profileInfoRows}>
+            <View style={styles.profileInfoRow}>
+              <Text style={styles.profileMutedText}>Blood Group</Text>
+              <Text style={styles.profileAccentText}>{profile.bloodGroup}</Text>
+            </View>
+            <View style={styles.profileInfoRow}>
+              <Text style={styles.profileMutedText}>Last Donation</Text>
+              <Text style={styles.profileValueText}>Not added yet</Text>
+            </View>
+            <View style={styles.profileInfoRow}>
+              <Text style={styles.profileMutedText}>Eligible to Donate</Text>
+              <Text style={styles.profileSuccessPill}>Based on last donation</Text>
+            </View>
+          </View>
+          <Pressable style={styles.profilePrimaryButton} onPress={openEditProfile}>
+            <MaterialCommunityIcons name="update" size={18} color="#ffffff" />
+            <Text style={styles.profilePrimaryButtonText}>Update Information</Text>
+          </Pressable>
+        </View>
+
+        <View>
+          <Text style={[styles.profileSectionTitle, styles.profileActivityHeading]}>My Activity</Text>
+          <View style={styles.profileActivityGrid}>
+            {[
+              { icon: 'water', value: '2', label: 'Active requests' },
+              { icon: 'hand-heart', value: '3', label: 'Donations' },
+              { icon: 'heart', value: '5', label: 'People helped' },
+            ].map((item) => (
+              <View key={item.label} style={styles.profileActivityCard}>
+                <View style={styles.profileActivityIcon}>
+                  <MaterialCommunityIcons name={item.icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#760009" />
+                </View>
+                <Text style={styles.profileActivityValue}>{item.value}</Text>
+                <Text style={styles.profileActivityLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.profileCard}>
+          <View style={styles.profileCardHeadingRow}>
+            <Text style={styles.profileSectionTitle}>My Blood Requests</Text>
+            <Text style={styles.profileStatusPill}>Active</Text>
+          </View>
+          <View style={styles.profileRequestPreview}>
+            <View style={styles.profileRequestTopRow}>
+              <Text style={styles.profileRequestBlood}>{profile.bloodGroup}</Text>
+              <Text style={styles.profileRequestUnits}>2 units required</Text>
+            </View>
+            <View style={styles.profileLocationRow}>
+              <MaterialCommunityIcons name="hospital" size={16} color="#59413e" />
+              <Text style={styles.profileMutedText}>AMRI Hospital, Kolkata</Text>
+            </View>
+          </View>
+          <View style={styles.profileButtonRow}>
+            <Pressable style={styles.profilePrimaryButtonSmall} onPress={() => Alert.alert('Blood Request', 'Request details will be connected later.')}>
+              <Text style={styles.profilePrimaryButtonText}>View Request</Text>
+            </Pressable>
+            <Pressable style={styles.profileSecondaryButton} onPress={onRequests}>
+              <Text style={styles.profileSecondaryButtonText}>View All</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.profileCard}>
+          <Text style={styles.profileSectionTitle}>Contact &amp; Privacy</Text>
+          {[
+            ['phone', 'Phone Number', profile.phone || '••••••••••'],
+            ['message-text', 'WhatsApp', 'Connected'],
+            ['map-marker', 'Location Sharing', 'Only after acceptance'],
+            ['lock', 'Privacy Settings', 'Manage'],
+          ].map(([icon, label, value]) => (
+            <Pressable key={label} style={styles.profileSettingRow} onPress={() => showComingSoon(label)}>
+              <View style={styles.profileSettingLabel}>
+                <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#59413e" />
+                <Text style={styles.profileValueText}>{label}</Text>
+              </View>
+              <View style={styles.profileSettingValue}>
+                <Text style={label === 'WhatsApp' ? styles.profileConnectedText : styles.profileMutedText}>{value}</Text>
+                <MaterialCommunityIcons name="chevron-right" size={18} color="#59413e" />
+              </View>
+            </Pressable>
+          ))}
+          <Text style={styles.profilePrivacyNote}>Exact location is shared only when you explicitly approve it.</Text>
+        </View>
+
+        <View style={styles.profileCard}>
+          <Text style={styles.profileSectionTitle}>Emergency Contact</Text>
+          <Text style={styles.profileMutedText}>Add a trusted family member who can be contacted during an emergency.</Text>
+          {emergencyContact ? (
+            <View style={styles.profileContactSummary}>
+              <Text style={styles.profileValueText}>{emergencyContact.name}</Text>
+              <Text style={styles.profileMutedText}>{emergencyContact.relationship} • {emergencyContact.phone}</Text>
+            </View>
+          ) : null}
+          <Pressable style={styles.profileOutlineButton} onPress={openEmergencyContact}>
+            <MaterialCommunityIcons name="account-plus-outline" size={18} color="#760009" />
+            <Text style={styles.profileOutlineButtonText}>{emergencyContact ? 'Edit Emergency Contact' : 'Add Emergency Contact'}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.profileCard}>
+          <Text style={styles.profileSectionTitle}>Donation History</Text>
+          {[
+            ['March 2026', 'Blood donation at AMRI Hospital'],
+            ['December 2025', 'Blood donation at City Blood Bank'],
+          ].map(([date, description]) => (
+            <View key={date} style={styles.profileHistoryRow}>
+              <View style={styles.profileHistoryDot} />
+              <View>
+                <Text style={styles.profileAccentText}>{date}</Text>
+                <Text style={styles.profileValueText}>{description}</Text>
+                <Text style={styles.profileConnectedText}>Status: Completed</Text>
+              </View>
+            </View>
+          ))}
+          <Pressable style={styles.profileSecondaryButtonFull} onPress={() => Alert.alert('Donation History', 'Full history will be connected later.')}>
+            <Text style={styles.profileSecondaryButtonText}>View Full History</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.profileCard}>
+          <Text style={styles.profileSectionTitle}>Settings</Text>
+          {[
+            ['bell-outline', 'Notifications'],
+            ['shield-check-outline', 'Privacy'],
+            ['crosshairs-gps', 'Location Permissions'],
+            ['message-text-outline', 'WhatsApp Preferences'],
+            ['help-circle-outline', 'Help & Support'],
+            ['information-outline', 'About BloodConnect'],
+          ].map(([icon, label]) => (
+            <Pressable key={label} style={styles.profileSettingRow} onPress={() => showComingSoon(label)}>
+              <View style={styles.profileSettingLabel}>
+                <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#59413e" />
+                <Text style={styles.profileValueText}>{label}</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={18} color="#59413e" />
+            </Pressable>
+          ))}
+        </View>
+
+        <Pressable style={styles.profileLogoutButton} onPress={() => Alert.alert('Log Out', 'Are you sure you want to log out?', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log Out', style: 'destructive', onPress: () => setProfile({ name: 'Aritra Sen', phone: '', bloodGroup: 'O+', location: 'Kolkata, West Bengal' }) },
+        ])}>
+          <MaterialCommunityIcons name="logout" size={18} color="#ba1a1a" />
+          <Text style={styles.profileLogoutText}>Log Out</Text>
+        </Pressable>
+      </ScrollView>
+
+      <Modal visible={editProfileVisible} transparent animationType="slide" onRequestClose={() => setEditProfileVisible(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Edit Profile</Text>
+            <Text style={styles.profileModalLabel}>Name</Text>
+            <TextInput
+              value={draftProfile.name}
+              onChangeText={(name) => setDraftProfile((current) => ({ ...current, name }))}
+              placeholder="Your name"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Phone number</Text>
+            <TextInput
+              value={draftProfile.phone}
+              onChangeText={(phone) => setDraftProfile((current) => ({ ...current, phone }))}
+              placeholder="Your phone number"
+              placeholderTextColor="#8d706d"
+              keyboardType="phone-pad"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Location</Text>
+            <TextInput
+              value={draftProfile.location}
+              onChangeText={(location) => setDraftProfile((current) => ({ ...current, location }))}
+              placeholder="City or location"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Blood group</Text>
+            <View style={styles.profileBloodGrid}>
+              {bloodGroups.map((group) => (
+                <Pressable
+                  key={group}
+                  onPress={() => setDraftProfile((current) => ({ ...current, bloodGroup: group }))}
+                  style={[styles.profileBloodChoice, draftProfile.bloodGroup === group && styles.profileBloodChoiceSelected]}
+                >
+                  <Text style={[styles.profileBloodChoiceText, draftProfile.bloodGroup === group && styles.profileBloodChoiceTextSelected]}>
+                    {group}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.profileModalActions}>
+              <Pressable style={styles.profileModalCancel} onPress={() => setEditProfileVisible(false)}>
+                <Text style={styles.profileModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.profileModalSave} onPress={saveProfile}>
+                <Text style={styles.profileModalSaveText}>Save Changes</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={contactVisible} transparent animationType="slide" onRequestClose={() => setContactVisible(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Emergency Contact</Text>
+            <Text style={styles.profileModalLabel}>Name</Text>
+            <TextInput
+              value={draftContact.name}
+              onChangeText={(name) => setDraftContact((current) => ({ ...current, name }))}
+              placeholder="Contact name"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Phone number</Text>
+            <TextInput
+              value={draftContact.phone}
+              onChangeText={(phone) => setDraftContact((current) => ({ ...current, phone }))}
+              placeholder="Contact phone number"
+              placeholderTextColor="#8d706d"
+              keyboardType="phone-pad"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Relationship</Text>
+            <TextInput
+              value={draftContact.relationship}
+              onChangeText={(relationship) => setDraftContact((current) => ({ ...current, relationship }))}
+              placeholder="For example, sibling"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <View style={styles.profileModalActions}>
+              <Pressable style={styles.profileModalCancel} onPress={() => setContactVisible(false)}>
+                <Text style={styles.profileModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.profileModalSave} onPress={saveEmergencyContact}>
+                <Text style={styles.profileModalSaveText}>Save Contact</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
@@ -2064,6 +2399,78 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 12,
   },
+  profileScreen: { flex: 1, backgroundColor: '#f7f9fb' },
+  profileScroll: { flex: 1 },
+  profileContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 112, gap: 16 },
+  profileHero: {
+    backgroundColor: '#ffffff', borderRadius: 20, padding: 24, alignItems: 'center',
+    shadowColor: '#991b1b', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2,
+  },
+  profileAvatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#eceef0', borderWidth: 5, borderColor: '#ffffff', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  profileName: { color: '#191c1e', fontSize: 24, lineHeight: 32, fontWeight: '600', marginBottom: 4 },
+  profileLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 16 },
+  profileMutedText: { color: '#59413e', fontSize: 13, lineHeight: 19 },
+  profileBadgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 18 },
+  profileBloodBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  profileBloodText: { color: '#93000a', fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  profileAvailabilityBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#eceef0', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  profileOnlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981' },
+  profileAvailabilityText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  profileOutlineButton: { width: '100%', minHeight: 46, borderRadius: 999, borderWidth: 1, borderColor: '#760009', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  profileOutlineButtonText: { color: '#760009', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  profileCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 18, shadowColor: '#991b1b', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  profileCardHeadingRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
+  profileHeadingCopy: { flex: 1 },
+  profileSectionTitle: { color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600', marginBottom: 4 },
+  profileFinePrint: { color: '#59413e', fontSize: 12, lineHeight: 16, opacity: 0.8 },
+  profileInfoRows: { gap: 4, marginVertical: 10 },
+  profileInfoRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  profileAccentText: { color: '#760009', fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  profileValueText: { color: '#191c1e', fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  profileSuccessPill: { color: '#166534', backgroundColor: '#f0fdf4', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, fontSize: 11, lineHeight: 16, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  profilePrimaryButton: { minHeight: 46, borderRadius: 999, backgroundColor: '#760009', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  profilePrimaryButtonText: { color: '#ffffff', fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  profileActivityHeading: { marginLeft: 4, marginBottom: 10 },
+  profileActivityGrid: { flexDirection: 'row', gap: 8 },
+  profileActivityCard: { flex: 1, minHeight: 126, backgroundColor: '#ffffff', borderRadius: 16, padding: 12, alignItems: 'center', justifyContent: 'center', shadowColor: '#991b1b', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  profileActivityIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffdad6', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  profileActivityValue: { color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600' },
+  profileActivityLabel: { color: '#59413e', fontSize: 11, lineHeight: 15, textAlign: 'center' },
+  profileStatusPill: { color: '#93000a', backgroundColor: '#ffdad6', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, fontSize: 11, lineHeight: 16, fontWeight: '700' },
+  profileRequestPreview: { backgroundColor: '#f2f4f6', borderRadius: 14, padding: 14, marginVertical: 8 },
+  profileRequestTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  profileRequestBlood: { color: '#ffffff', backgroundColor: '#760009', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  profileRequestUnits: { color: '#191c1e', fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  profileButtonRow: { flexDirection: 'row', gap: 8 },
+  profilePrimaryButtonSmall: { flex: 1, minHeight: 42, borderRadius: 999, backgroundColor: '#760009', alignItems: 'center', justifyContent: 'center' },
+  profileSecondaryButton: { flex: 1, minHeight: 42, borderRadius: 999, borderWidth: 1, borderColor: '#8d706d', alignItems: 'center', justifyContent: 'center' },
+  profileSecondaryButtonText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  profileSettingRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: 1, borderBottomColor: '#eceef0' },
+  profileSettingLabel: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  profileSettingValue: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '55%' },
+  profileConnectedText: { color: '#166534', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  profilePrivacyNote: { color: '#59413e', fontSize: 11, lineHeight: 16, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eceef0' },
+  profileHistoryRow: { position: 'relative', flexDirection: 'row', gap: 12, paddingLeft: 8, paddingBottom: 16, marginLeft: 4, borderLeftWidth: 2, borderLeftColor: '#e0e3e5' },
+  profileHistoryDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#760009', borderWidth: 2, borderColor: '#ffffff', position: 'absolute', left: -6, top: 2 },
+  profileSecondaryButtonFull: { minHeight: 44, borderRadius: 999, backgroundColor: '#f2f4f6', alignItems: 'center', justifyContent: 'center' },
+  profileContactSummary: { backgroundColor: '#f2f4f6', borderRadius: 12, padding: 12, marginVertical: 12, gap: 3 },
+  profileLogoutButton: { minHeight: 46, borderRadius: 999, borderWidth: 1, borderColor: '#ba1a1a', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  profileLogoutText: { color: '#ba1a1a', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  profileModalBackdrop: { flex: 1, backgroundColor: 'rgba(25, 28, 30, 0.42)', justifyContent: 'flex-end' },
+  profileModalCard: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 8 },
+  profileModalTitle: { color: '#191c1e', fontSize: 24, lineHeight: 32, fontWeight: '600', marginBottom: 8 },
+  profileModalLabel: { color: '#59413e', fontSize: 13, lineHeight: 18, fontWeight: '600', marginTop: 4 },
+  profileModalInput: { backgroundColor: '#f2f4f6', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#191c1e', fontSize: 15, lineHeight: 21 },
+  profileBloodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
+  profileBloodChoice: { width: '22%', minHeight: 40, borderRadius: 10, backgroundColor: '#f2f4f6', alignItems: 'center', justifyContent: 'center' },
+  profileBloodChoiceSelected: { backgroundColor: '#760009' },
+  profileBloodChoiceText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  profileBloodChoiceTextSelected: { color: '#ffffff' },
+  profileModalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  profileModalCancel: { flex: 1, minHeight: 46, borderRadius: 999, backgroundColor: '#eceef0', alignItems: 'center', justifyContent: 'center' },
+  profileModalCancelText: { color: '#191c1e', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  profileModalSave: { flex: 1, minHeight: 46, borderRadius: 999, backgroundColor: '#760009', alignItems: 'center', justifyContent: 'center' },
+  profileModalSaveText: { color: '#ffffff', fontSize: 14, lineHeight: 20, fontWeight: '700' },
   acceptedCard: {
     backgroundColor: '#f8dcdc',
     borderRadius: 20,
