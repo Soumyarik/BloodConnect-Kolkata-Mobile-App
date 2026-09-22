@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -15,6 +15,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthScreen } from './components/AuthScreen';
+import { supabase } from './utils/supabase';
 
 const heroImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDNwv9RW78-JfebQWjT2TUScOmIeBnv3NQXDzTuiciY9uZbrJJkyU4Lg8ByPzzTeSg1dUxAueLjxliDQkm4u65_yKtzsQu2bgK5cGwsWwyxopzRSbuUdbD2UPIf9rs1v-HqTtXyhxJH1WjNBbdYznIrigrooMsZYL0KqfnT1vz_IoxcjQaTAPpjkpq3fJf5MWxH-5LMdheTkRypPl4e2fBRNSzam2IrIocXg206shWo16lHVyeujyPUfA';
@@ -503,7 +507,11 @@ type ProfileData = {
   name: string;
   phone: string;
   bloodGroup: string;
-  location: string;
+  dateOfBirth: string;
+  gender: string;
+  city: string;
+  area: string;
+  donorAvailable: boolean;
 };
 
 type EmergencyContact = {
@@ -514,28 +522,129 @@ type EmergencyContact = {
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
-function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests: () => void }) {
-  const [availableToDonate, setAvailableToDonate] = useState(true);
-  const [profile, setProfile] = useState<ProfileData>({
-    name: 'Aritra Sen',
+function ProfileScreen({
+  onHome,
+  onRequests,
+  onSignOut,
+}: {
+  onHome: () => void;
+  onRequests: () => void;
+  onSignOut: () => Promise<void>;
+}) {
+  const { user, createProfile } = useAuth();
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [draftProfile, setDraftProfile] = useState<ProfileData>({
+    name: '',
     phone: '',
     bloodGroup: 'O+',
-    location: 'Kolkata, West Bengal',
+    dateOfBirth: '',
+    gender: '',
+    city: '',
+    area: '',
+    donorAvailable: false,
   });
-  const [draftProfile, setDraftProfile] = useState(profile);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [emergencyContact, setEmergencyContact] = useState<EmergencyContact | null>(null);
   const [draftContact, setDraftContact] = useState<EmergencyContact>({ name: '', phone: '', relationship: '' });
   const [contactVisible, setContactVisible] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [availableToDonate, setAvailableToDonate] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  const loadProfile = async () => {
+    setProfileLoading(true);
+    setProfileError('');
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      setProfileError(userError?.message || 'Your authenticated user could not be found.');
+      setProfileLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, emergency_contact_name, emergency_contact_phone')
+      .eq('id', userData.user.id)
+      .maybeSingle();
+
+    if (error) {
+      setProfileError(`Unable to load your profile: ${error.message}`);
+      setProfileLoading(false);
+      return;
+    }
+
+    if (!data) {
+      setProfileError('Your profile record could not be found. Please sign out and create your profile again.');
+      setProfileLoading(false);
+      return;
+    }
+
+    const nextProfile: ProfileData = {
+      name: data.full_name || 'BloodConnect User',
+      phone: data.phone || '',
+      bloodGroup: data.blood_group || 'O+',
+      dateOfBirth: data.date_of_birth || '',
+      gender: data.gender || '',
+      city: data.city || 'Kolkata',
+      area: data.area || 'West Bengal',
+      donorAvailable: data.donor_available ?? false,
+    };
+    setProfile(nextProfile);
+    setDraftProfile(nextProfile);
+    setAvailableToDonate(nextProfile.donorAvailable);
+    setEmergencyContact(
+      data.emergency_contact_name || data.emergency_contact_phone
+        ? {
+            name: data.emergency_contact_name || '',
+            phone: data.emergency_contact_phone || '',
+            relationship: '',
+          }
+        : null,
+    );
+    setProfileLoading(false);
+  };
+
+  useEffect(() => {
+    if (user) void loadProfile();
+  }, [user]);
+
+  const updateProfileRow = async (updates: Record<string, string | boolean | null>) => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      throw new Error(userError?.message || 'Your authenticated user could not be found.');
+    }
+
+    const { error } = await supabase.from('profiles').update(updates).eq('id', userData.user.id);
+    if (error) throw new Error(error.message);
+  };
 
   const openEditProfile = () => {
-    setDraftProfile(profile);
+    if (profile) setDraftProfile(profile);
     setEditProfileVisible(true);
   };
 
-  const saveProfile = () => {
-    setProfile(draftProfile);
-    setEditProfileVisible(false);
+  const saveProfile = async () => {
+    setSaving(true);
+    setProfileError('');
+    try {
+      await updateProfileRow({
+        full_name: draftProfile.name.trim(),
+        phone: draftProfile.phone.trim() || null,
+        blood_group: draftProfile.bloodGroup,
+        date_of_birth: draftProfile.dateOfBirth.trim() || null,
+        gender: draftProfile.gender.trim() || null,
+        city: draftProfile.city.trim() || null,
+        area: draftProfile.area.trim() || null,
+      });
+      setProfile({ ...draftProfile, donorAvailable: availableToDonate });
+      setEditProfileVisible(false);
+    } catch (error) {
+      setProfileError(`Unable to save your profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openEmergencyContact = () => {
@@ -543,14 +652,71 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
     setContactVisible(true);
   };
 
-  const saveEmergencyContact = () => {
+  const saveEmergencyContact = async () => {
     if (!draftContact.name.trim() || !draftContact.phone.trim() || !draftContact.relationship.trim()) {
       Alert.alert('Missing details', 'Please complete all emergency contact fields.');
       return;
     }
-    setEmergencyContact(draftContact);
-    setContactVisible(false);
+    setSaving(true);
+    setProfileError('');
+    try {
+      await updateProfileRow({
+        emergency_contact_name: draftContact.name.trim(),
+        emergency_contact_phone: draftContact.phone.trim(),
+      });
+      setEmergencyContact(draftContact);
+      setContactVisible(false);
+    } catch (error) {
+      setProfileError(`Unable to save emergency contact: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const updateAvailability = async (nextValue: boolean) => {
+    if (!profile) return;
+    setAvailableToDonate(nextValue);
+    setProfileError('');
+    try {
+      await updateProfileRow({ donor_available: nextValue });
+      setProfile({ ...profile, donorAvailable: nextValue });
+    } catch (error) {
+      setAvailableToDonate(profile.donorAvailable);
+      setProfileError(`Unable to update availability: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const createMissingProfile = async () => {
+    setSaving(true);
+    setProfileError('');
+    const fallbackName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'BloodConnect User';
+    const result = await createProfile({ fullName: fallbackName, bloodGroup: 'O+' });
+    if (result.error) {
+      setProfileError(`Unable to create your profile: ${result.error.message}`);
+    } else {
+      await loadProfile();
+    }
+    setSaving(false);
+  };
+
+  if (profileLoading) {
+    return (
+      <View style={styles.profileScreen}>
+        <Text style={styles.authLoadingText}>Loading your profile...</Text>
+      </View>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <View style={styles.profileScreen}>
+        <Text style={styles.profileErrorText}>{profileError || 'Unable to load your profile.'}</Text>
+        <Pressable style={styles.profilePrimaryButtonSmall} onPress={() => void createMissingProfile()} disabled={saving}>
+          <Text style={styles.profilePrimaryButtonText}>{saving ? 'Creating Profile...' : 'Create Profile'}</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   const showComingSoon = (title: string) => {
     Alert.alert(title, 'Coming soon - this feature will be connected later.');
@@ -565,6 +731,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
         contentContainerStyle={styles.profileContent}
         showsVerticalScrollIndicator={false}
       >
+        {profileError ? <Text style={styles.profileErrorText}>{profileError}</Text> : null}
         <View style={styles.profileHero}>
           <View style={styles.profileAvatar}>
             <MaterialCommunityIcons name="account" size={48} color="#59413e" />
@@ -572,7 +739,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
           <Text style={styles.profileName}>{profile.name}</Text>
           <View style={styles.profileLocationRow}>
             <MaterialCommunityIcons name="map-marker" size={16} color="#59413e" />
-            <Text style={styles.profileMutedText}>{profile.location}</Text>
+            <Text style={styles.profileMutedText}>{[profile.city, profile.area].filter(Boolean).join(', ')}</Text>
           </View>
           <View style={styles.profileBadgeRow}>
             <View style={styles.profileBloodBadge}>
@@ -600,7 +767,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
             </View>
             <Switch
               value={availableToDonate}
-              onValueChange={setAvailableToDonate}
+              onValueChange={updateAvailability}
               trackColor={{ false: '#d9dfe4', true: '#760009' }}
               thumbColor="#ffffff"
             />
@@ -618,6 +785,14 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
             <View style={styles.profileInfoRow}>
               <Text style={styles.profileMutedText}>Last Donation</Text>
               <Text style={styles.profileValueText}>Not added yet</Text>
+            </View>
+            <View style={styles.profileInfoRow}>
+              <Text style={styles.profileMutedText}>Date of Birth</Text>
+              <Text style={styles.profileValueText}>{profile.dateOfBirth || 'Not added yet'}</Text>
+            </View>
+            <View style={styles.profileInfoRow}>
+              <Text style={styles.profileMutedText}>Gender</Text>
+              <Text style={styles.profileValueText}>{profile.gender || 'Not added yet'}</Text>
             </View>
             <View style={styles.profileInfoRow}>
               <Text style={styles.profileMutedText}>Eligible to Donate</Text>
@@ -677,7 +852,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
         <View style={styles.profileCard}>
           <Text style={styles.profileSectionTitle}>Contact &amp; Privacy</Text>
           {[
-            ['phone', 'Phone Number', profile.phone || '••••••••••'],
+              ['phone', 'Phone Number', profile.phone || '••••••••••'],
             ['message-text', 'WhatsApp', 'Connected'],
             ['map-marker', 'Location Sharing', 'Only after acceptance'],
             ['lock', 'Privacy Settings', 'Manage'],
@@ -753,7 +928,23 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
 
         <Pressable style={styles.profileLogoutButton} onPress={() => Alert.alert('Log Out', 'Are you sure you want to log out?', [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Log Out', style: 'destructive', onPress: () => setProfile({ name: 'Aritra Sen', phone: '', bloodGroup: 'O+', location: 'Kolkata, West Bengal' }) },
+          {
+            text: 'Log Out',
+            style: 'destructive',
+            onPress: () => {
+              setProfile({
+                name: 'Aritra Sen',
+                phone: '',
+                bloodGroup: 'O+',
+                dateOfBirth: '',
+                gender: '',
+                city: 'Kolkata',
+                area: 'West Bengal',
+                donorAvailable: false,
+              });
+              void onSignOut();
+            },
+          },
         ])}>
           <MaterialCommunityIcons name="logout" size={18} color="#ba1a1a" />
           <Text style={styles.profileLogoutText}>Log Out</Text>
@@ -781,11 +972,35 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
               keyboardType="phone-pad"
               style={styles.profileModalInput}
             />
-            <Text style={styles.profileModalLabel}>Location</Text>
+            <Text style={styles.profileModalLabel}>City</Text>
             <TextInput
-              value={draftProfile.location}
-              onChangeText={(location) => setDraftProfile((current) => ({ ...current, location }))}
-              placeholder="City or location"
+              value={draftProfile.city}
+              onChangeText={(city) => setDraftProfile((current) => ({ ...current, city }))}
+              placeholder="City"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Area</Text>
+            <TextInput
+              value={draftProfile.area}
+              onChangeText={(area) => setDraftProfile((current) => ({ ...current, area }))}
+              placeholder="Area or locality"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Date of birth</Text>
+            <TextInput
+              value={draftProfile.dateOfBirth}
+              onChangeText={(dateOfBirth) => setDraftProfile((current) => ({ ...current, dateOfBirth }))}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Gender</Text>
+            <TextInput
+              value={draftProfile.gender}
+              onChangeText={(gender) => setDraftProfile((current) => ({ ...current, gender }))}
+              placeholder="Gender"
               placeholderTextColor="#8d706d"
               style={styles.profileModalInput}
             />
@@ -808,7 +1023,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
               <Pressable style={styles.profileModalSave} onPress={saveProfile}>
-                <Text style={styles.profileModalSaveText}>Save Changes</Text>
+                <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
               </Pressable>
             </View>
           </View>
@@ -849,7 +1064,7 @@ function ProfileScreen({ onHome, onRequests }: { onHome: () => void; onRequests:
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
               <Pressable style={styles.profileModalSave} onPress={saveEmergencyContact}>
-                <Text style={styles.profileModalSaveText}>Save Contact</Text>
+                <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Contact'}</Text>
               </Pressable>
             </View>
           </View>
@@ -1192,6 +1407,14 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#f7f9fb',
+  },
+  authLoadingText: {
+    color: '#59413e',
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginTop: 'auto',
+    marginBottom: 'auto',
   },
   headerWrap: {
     position: 'absolute',
@@ -2456,6 +2679,7 @@ const styles = StyleSheet.create({
   profileContactSummary: { backgroundColor: '#f2f4f6', borderRadius: 12, padding: 12, marginVertical: 12, gap: 3 },
   profileLogoutButton: { minHeight: 46, borderRadius: 999, borderWidth: 1, borderColor: '#ba1a1a', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   profileLogoutText: { color: '#ba1a1a', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  profileErrorText: { color: '#ba1a1a', backgroundColor: '#ffdad6', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 18 },
   profileModalBackdrop: { flex: 1, backgroundColor: 'rgba(25, 28, 30, 0.42)', justifyContent: 'flex-end' },
   profileModalCard: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 8 },
   profileModalTitle: { color: '#191c1e', fontSize: 24, lineHeight: 32, fontWeight: '600', marginBottom: 8 },
@@ -2610,8 +2834,21 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function App() {
+function AppContent() {
+  const { session, loading, signIn, signUp, signOut } = useAuth();
   const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'profile' | 'findDonor'>('home');
+
+  if (loading) {
+    return (
+      <View style={styles.screen}>
+        <Text style={styles.authLoadingText}>Loading BloodConnect...</Text>
+      </View>
+    );
+  }
+
+  if (!session) {
+    return <AuthScreen signIn={signIn} signUp={signUp} />;
+  }
 
   if (screen === 'home') {
     return (
@@ -2650,5 +2887,22 @@ export default function App() {
     );
   }
 
-  return <ProfileScreen onHome={() => setScreen('home')} onRequests={() => setScreen('requests')} />;
+  return (
+    <ProfileScreen
+      onHome={() => setScreen('home')}
+      onRequests={() => setScreen('requests')}
+      onSignOut={async () => {
+        await signOut();
+        setScreen('home');
+      }}
+    />
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
 }
