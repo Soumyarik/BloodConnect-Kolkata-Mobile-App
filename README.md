@@ -1,1 +1,0 @@
-# BloodConnect-Kolkata-Mobile-App
