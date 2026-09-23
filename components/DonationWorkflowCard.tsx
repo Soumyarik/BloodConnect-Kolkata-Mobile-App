@@ -314,7 +314,12 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
       </View>
 
       <View style={workflowStyles.progressTrack}>
-        <View style={[workflowStyles.progressFill, { width: progressPercent + '%' }]} />
+        <View
+          style={[
+            workflowStyles.progressFill,
+            { width: (progressPercent + '%') as `${number}%` },
+          ]}
+        />
       </View>
 
       <Text style={workflowStyles.stageDescription}>{meta?.description}</Text>
