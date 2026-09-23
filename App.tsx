@@ -592,6 +592,21 @@ type BloodRequestRow = {
   contact_phone: string;
 };
 
+type BloodRequestConnectionRow = {
+  request_id: string; patient_name: string | null; blood_group: string; units_required: number;
+  hospital_name: string; hospital_address: string | null; city: string; area: string | null;
+  required_date: string | null; required_time: string | null; status: string; is_emergency: boolean;
+  requester_phone: string | null; is_requester: boolean; accepted_donor_id: string | null;
+  donor_name: string | null; donor_phone: string | null; donor_blood_group: string | null;
+  donor_city: string | null; donor_area: string | null;
+};
+
+type BloodRequestConnection = {
+  isRequester: boolean; requesterPhone: string | null; selectedDonorId: string | null;
+  donorName: string | null; donorPhone: string | null; donorBloodGroup: string | null;
+  donorCity: string | null; donorArea: string | null;
+};
+
 const toBloodRequest = (row: BloodRequestRow): BloodRequest => ({
   id: row.id,
   patientName: row.patient_name,
@@ -864,8 +879,12 @@ function RequestsScreen({
                         </View>
 
                         {item.responseStatus === 'accepted' ? (
-                          <Pressable
-                            style={styles.donorWithdrawButton}
+                          <>
+                            <Pressable style={styles.detailsSecondaryButton} onPress={() => onRequestDetails(item.requestId)}>
+                              <Text style={styles.detailsSecondaryText}>View Donation Details</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.donorWithdrawButton}
                             disabled={respondingId === item.responseId}
                             onPress={() => {
                               Alert.alert(
@@ -904,7 +923,8 @@ function RequestsScreen({
                             <Text style={styles.donorWithdrawText}>
                               {respondingId === item.responseId ? 'Please wait...' : 'Withdraw Acceptance'}
                             </Text>
-                          </Pressable>
+                            </Pressable>
+                          </>
                         ) : null}
                       </>
                     )}
@@ -960,6 +980,7 @@ function BloodRequestDetailsScreen({
   requestId: string;
 }) {
   const [request, setRequest] = useState<BloodRequest | null>(null);
+  const [connectionDetails, setConnectionDetails] = useState<BloodRequestConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [donorResponses, setDonorResponses] = useState<Array<{ id: string; donorId: string; status: string; createdAt: string }>>([]);
@@ -992,41 +1013,33 @@ function BloodRequestDetailsScreen({
       return;
     }
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      setErrorMessage(userError?.message || 'You must be signed in to view this request.');
-      setLoading(false);
-      return;
-    }
-
-    const [{ data, error }, { data: responseData, error: responseError }] = await Promise.all([
-      supabase
-        .from('blood_requests')
-        .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
-        .eq('id', requestId)
-        .eq('requester_id', userData.user.id)
-        .maybeSingle(),
-      supabase
-        .from('donor_responses')
-        .select('id, donor_id, status, created_at')
-        .eq('request_id', requestId)
-        .order('created_at', { ascending: true }),
+    const [{ data: connectionData, error: connectionError }, { data: responseData, error: responseError }] = await Promise.all([
+      supabase.rpc('get_blood_request_connection_details', { p_request_id: requestId }).maybeSingle(),
+      supabase.from('donor_responses').select('id, donor_id, status, created_at').eq('request_id', requestId).order('created_at', { ascending: true }),
     ]);
 
-    if (error) {
-      setErrorMessage(`Unable to load request: ${error.message}`);
-      setLoading(false);
-      return;
-    }
-
-    if (!data) {
+    if (connectionError || !connectionData) {
       setRequest(null);
-      setErrorMessage('This request could not be found or is not owned by your account.');
+      setConnectionDetails(null);
+      setErrorMessage(`Unable to load request: ${connectionError?.message || 'This request is not available to your account.'}`);
       setLoading(false);
       return;
     }
 
-    setRequest(toBloodRequest(data as BloodRequestRow));
+    const row = connectionData as BloodRequestConnectionRow;
+    setRequest({
+      id: row.request_id, patientName: row.patient_name || '', bloodGroup: row.blood_group,
+      unitsRequired: row.units_required, hospitalName: row.hospital_name,
+      hospitalAddress: row.hospital_address || '', city: row.city, area: row.area || '',
+      requiredDate: row.required_date, requiredTime: row.required_time, status: row.status,
+      isEmergency: row.is_emergency, contactPhone: row.requester_phone || '',
+    });
+    setConnectionDetails({
+      isRequester: row.is_requester, requesterPhone: row.requester_phone,
+      selectedDonorId: row.accepted_donor_id, donorName: row.donor_name,
+      donorPhone: row.donor_phone, donorBloodGroup: row.donor_blood_group,
+      donorCity: row.donor_city, donorArea: row.donor_area,
+    });
 
     if (responseError) {
       setErrorMessage(`Request loaded, but donor responses could not be loaded: ${responseError.message}`);
@@ -1134,6 +1147,33 @@ function BloodRequestDetailsScreen({
     setRequest({ ...request, status: 'cancelled' });
   };
 
+  const openExternal = async (url: string, action: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      const message = `Unable to ${action}: ${error instanceof Error ? error.message : 'Please try again.'}`;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(message);
+      else Alert.alert('Unable to open link', message);
+    }
+  };
+
+  const callContact = (phone: string | null, person: string) => {
+    if (!phone) { Alert.alert('Phone unavailable', `${person}'s phone number is not available.`); return; }
+    void openExternal('tel:' + phone, `call ${person}`);
+  };
+
+  const whatsappContact = (phone: string | null, person: string) => {
+    const digits = phone?.replace(/\D/g, '') || '';
+    if (!digits) { Alert.alert('WhatsApp unavailable', `${person}'s phone number is not available.`); return; }
+    void openExternal('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits), `contact ${person} on WhatsApp`);
+  };
+
+  const openHospitalDirections = () => {
+    if (!request) return;
+    const destination = [request.hospitalName, request.hospitalAddress, request.city].filter(Boolean).join(', ');
+    void openExternal('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(destination), 'open hospital directions in Google Maps');
+  };
+
   if (loading) {
     return <View style={styles.detailsScreen}><Text style={styles.authLoadingText}>Loading request...</Text></View>;
   }
@@ -1152,7 +1192,7 @@ function BloodRequestDetailsScreen({
             <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
           </Pressable>
           <Text style={styles.detailsTitle}>Blood Request Details</Text>
-          <Pressable
+          {connectionDetails?.isRequester ? <Pressable
             style={styles.detailsIconButton}
             onPress={() =>
               Alert.alert('Request options', 'Choose an action', [
@@ -1167,7 +1207,7 @@ function BloodRequestDetailsScreen({
             accessibilityLabel="More options"
           >
             <MaterialCommunityIcons name="dots-vertical" size={22} color="#191c1e" />
-          </Pressable>
+          </Pressable> : <View style={styles.detailsIconButton} />}
         </View>
 
         <View style={styles.detailsCard}>
@@ -1198,7 +1238,7 @@ function BloodRequestDetailsScreen({
         <View style={styles.detailsCard}>
           <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="account-alert" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Patient Information</Text></View>
           <View style={styles.detailsGrid}>
-            <View><Text style={styles.detailsLabel}>Patient Name</Text><Text style={styles.detailsValue}>{request.patientName}</Text></View>
+            {connectionDetails?.isRequester ? <View><Text style={styles.detailsLabel}>Patient Name</Text><Text style={styles.detailsValue}>{request.patientName}</Text></View> : null}
             <View><Text style={styles.detailsLabel}>Blood Group</Text><Text style={styles.detailsAccentValue}>O Positive ({request.bloodGroup})</Text></View>
             <View><Text style={styles.detailsLabel}>Units Required</Text><Text style={styles.detailsValue}>{request.unitsRequired} Units</Text></View>
             <View><Text style={styles.detailsLabel}>Required By</Text><Text style={styles.detailsValue}>{formatRequestDeadline(request)}</Text></View>
@@ -1215,15 +1255,52 @@ function BloodRequestDetailsScreen({
           </View>
           <Pressable
             style={styles.detailsSecondaryButton}
-            onPress={() =>
-              void Linking.openURL(
-                'https://www.google.com/maps/search/?api=1&query=' +
-                  encodeURIComponent([request.hospitalName, request.hospitalAddress, request.area, request.city].filter(Boolean).join(', ')),
-              )
-            }
+            onPress={openHospitalDirections}
           >
             <MaterialCommunityIcons name="map-outline" size={18} color="#760009" /><Text style={styles.detailsSecondaryText}>View Hospital Location</Text>
           </Pressable>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailsSectionHeading}>
+            <MaterialCommunityIcons name="account-lock-outline" size={22} color="#760009" />
+            <Text style={styles.detailsSectionTitle}>Connection Details</Text>
+          </View>
+          {connectionDetails?.isRequester ? (
+            connectionDetails.selectedDonorId ? (
+              <>
+                <Text style={styles.detailsHospitalName}>Your Donor</Text>
+                <View style={styles.detailsGrid}>
+                  <View><Text style={styles.detailsLabel}>Name</Text><Text style={styles.detailsValue}>{connectionDetails.donorName || 'BloodConnect donor'}</Text></View>
+                  <View><Text style={styles.detailsLabel}>Blood Group</Text><Text style={styles.detailsAccentValue}>{connectionDetails.donorBloodGroup || 'Not available'}</Text></View>
+                  <View><Text style={styles.detailsLabel}>Approximate area</Text><Text style={styles.detailsValue}>{[connectionDetails.donorArea, connectionDetails.donorCity].filter(Boolean).join(', ') || 'Kolkata'}</Text></View>
+                </View>
+                <View style={styles.incomingActions}>
+                  <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails.donorPhone, 'donor')}><Text style={styles.donorRequestText}>Call Donor</Text></Pressable>
+                  <Pressable style={styles.donorRequestButtonSecondary} onPress={() => whatsappContact(connectionDetails.donorPhone, 'donor')}><Text style={styles.donorRequestButtonSecondaryText}>WhatsApp Donor</Text></Pressable>
+                </View>
+              </>
+            ) : donorResponses.some((item) => item.status === 'accepted') ? (
+              <><Text style={styles.detailsValue}>An eligible donor has accepted.</Text><Text style={styles.detailsMuted}>Donor contact details appear here after you select an accepted donor.</Text></>
+            ) : (
+              <><Text style={styles.detailsValue}>Waiting for donor acceptance</Text><Text style={styles.detailsMuted}>No personal contact details are shared until a donor accepts.</Text></>
+            )
+          ) : (
+            <>
+              <Text style={styles.detailsHospitalName}>Your Donation Details</Text>
+              <View style={styles.detailsGrid}>
+                <View><Text style={styles.detailsLabel}>Requester contact number</Text><Text style={styles.detailsValue}>{connectionDetails?.requesterPhone || 'Not available'}</Text></View>
+                <View><Text style={styles.detailsLabel}>Blood Group and Units</Text><Text style={styles.detailsAccentValue}>{request.bloodGroup} · {request.unitsRequired} {request.unitsRequired === 1 ? 'unit' : 'units'}</Text></View>
+                <View><Text style={styles.detailsLabel}>Hospital</Text><Text style={styles.detailsValue}>{request.hospitalName}</Text></View>
+                <View><Text style={styles.detailsLabel}>Hospital address</Text><Text style={styles.detailsValue}>{request.hospitalAddress || [request.area, request.city].filter(Boolean).join(', ')}</Text></View>
+                <View><Text style={styles.detailsLabel}>Required by</Text><Text style={styles.detailsValue}>{formatRequestDeadline(request)}</Text></View>
+              </View>
+              <View style={styles.incomingActions}>
+                <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails?.requesterPhone || null, 'requester')}><Text style={styles.donorRequestText}>Call Requester</Text></Pressable>
+                <Pressable style={styles.donorRequestButtonSecondary} onPress={openHospitalDirections}><Text style={styles.donorRequestButtonSecondaryText}>Open in Google Maps</Text></Pressable>
+              </View>
+            </>
+          )}
         </View>
 
         <View style={styles.detailsCard}>
@@ -1251,7 +1328,7 @@ function BloodRequestDetailsScreen({
           ))}
         </View>
 
-        <View style={styles.detailsCard} onLayout={(event) => setDonorResponsesY(event.nativeEvent.layout.y)}>
+        {connectionDetails?.isRequester ? <View style={styles.detailsCard} onLayout={(event) => setDonorResponsesY(event.nativeEvent.layout.y)}>
           <View style={styles.detailsSectionHeading}>
             <Text style={styles.detailsSectionTitle}>Donor Responses ({donorResponses.length})</Text>
             {donorResponses.some((item) => item.status === 'accepted') ? <Text style={styles.activeMatchBadge}>Accepted</Text> : null}
@@ -1281,10 +1358,11 @@ function BloodRequestDetailsScreen({
               </View>
             </View>
           )}
-        </View>
+        </View> : null}
 
         <DonationWorkflowCard requestId={request.id} />
 
+        {connectionDetails?.isRequester ? <>
         <Pressable style={styles.detailsPrimaryButton} onPress={onFindDonor}>
           <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
           <Text style={styles.detailsPrimaryText}>Find Compatible Donors</Text>
@@ -1300,6 +1378,7 @@ function BloodRequestDetailsScreen({
           <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status !== 'open'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
           <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Cancel Request', 'Are you sure you want to cancel this request?', [{ text: 'Keep Open', style: 'cancel' }, { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }])}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
         </View>
+        </> : null}
 
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="truck-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>Hospital Pickup Information</Text><Text style={styles.detailsMuted}>Pickup information is available only for verified hospitals or authorized partners in Kolkata.</Text></View></View>
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="shield-check-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>BloodConnect Privacy Guarantee</Text><Text style={styles.detailsMuted}>Exact donor location and personal contact information are shared only with appropriate consent.</Text></View></View>
