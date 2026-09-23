@@ -3223,6 +3223,59 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+
+  donorRequestButtonDisabled: {
+    backgroundColor: '#e0e3e5',
+  },
+  donorRequestButtonSecondary: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#8d706d',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  donorRequestButtonSecondaryText: {
+    color: '#191c1e',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  incomingRequestCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#991b1b',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  incomingPrivacyBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f2f4f6',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  incomingActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  incomingStatusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f8dcdc',
+    borderRadius: 12,
+    padding: 10,
+  },
   donorEmptyState: {
     backgroundColor: '#ffffff',
     borderRadius: 20,
@@ -3478,6 +3531,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+
+  requestsListScroll: {
+    flex: 1,
+  },
+  requestsListContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 112,
+    gap: 12,
+  },
+  requestsSectionTitle: {
+    color: '#191c1e',
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  requestsSectionSubtitle: {
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -4,
   },
   emptyState: {
     flex: 1,
