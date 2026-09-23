@@ -2068,7 +2068,6 @@ function RequestBloodScreen({
   const [emergencyMode, setEmergencyMode] = useState(true);
   const [saving, setSaving] = useState(false);
   const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [currentLocationLabel, setCurrentLocationLabel] = useState('');
   const [scheduleVisible, setScheduleVisible] = useState(false);
   const [requiredDate, setRequiredDate] = useState('');
   const [requiredTime, setRequiredTime] = useState('');
@@ -2078,32 +2077,42 @@ function RequestBloodScreen({
 
   const fillCurrentLocation = async () => {
     setErrorMessage('');
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert('Location permission needed', 'Allow BloodConnect to use your location while the app is open to fill the request location.');
-      return;
-    }
-
     try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Location permission needed', 'Allow BloodConnect to use your location while the app is open to fill the request location.');
+        return;
+      }
+
       const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const { latitude, longitude } = position.coords;
       setLocationCoords({ latitude, longitude });
 
-      let label = 'Current location';
-      try {
-        const places = await Location.reverseGeocodeAsync({ latitude, longitude });
-        const place = places[0];
-        const locality = [place?.district, place?.subregion, place?.city, place?.region]
-          .filter(Boolean)
-          .filter((value, index, values) => values.indexOf(value) === index);
-        label = locality.join(', ') || label;
-      } catch {
-        // Reverse geocoding is optional; the coordinates remain available.
+      let label = '';
+      if (Platform.OS !== 'web') {
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+          const place = places[0];
+          label = [place?.subregion, place?.district, place?.city, place?.region]
+            .filter((value): value is string => Boolean(value?.trim()))
+            .filter((value, index, values) => values.findIndex((part) => part.toLowerCase() === value.toLowerCase()) === index)
+            .join(', ');
+        } catch {
+          // Reverse geocoding is unavailable on web and can fail on-device.
+        }
       }
 
-      setCurrentLocationLabel(label);
-      setLocation(label);
-      Alert.alert('Location added', 'Your current area is now displayed below the location button and added to the request location field. Verify that it is the hospital location before submitting.');
+      if (label) {
+        setLocation(label);
+        Alert.alert('Location added', 'The approximate current area has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
+      } else {
+        const currentLocation = location.trim();
+        const fallbackLocation = currentLocation && currentLocation !== 'Current location'
+          ? currentLocation
+          : 'Kolkata, West Bengal';
+        setLocation(fallbackLocation);
+        Alert.alert('Address lookup unavailable', 'Your location was detected, but this platform could not convert it to an area name. The field shows an approximate fallback; enter the hospital locality before submitting.');
+      }
     } catch (error) {
       Alert.alert('Unable to get location', error instanceof Error ? error.message : 'Please try again.');
     }
@@ -2343,7 +2352,6 @@ function RequestBloodScreen({
                     onChangeText={(value) => {
                       setLocation(value);
                       setLocationCoords(null);
-                      setCurrentLocationLabel('');
                     }}
                     placeholder="Kolkata, West Bengal"
                     placeholderTextColor="#8d706d"
@@ -2357,18 +2365,6 @@ function RequestBloodScreen({
                 <Text style={styles.inlineActionText}>Use Current Location</Text>
               </Pressable>
 
-              {currentLocationLabel ? (
-                <View style={styles.currentLocationPreview}>
-                  <MaterialCommunityIcons name="map-marker-radius" size={18} color="#760009" />
-                  <View style={styles.currentLocationPreviewText}>
-                    <Text style={styles.currentLocationPreviewTitle}>Your current location</Text>
-                    <Text style={styles.currentLocationPreviewValue}>{currentLocationLabel}</Text>
-                    <Text style={styles.currentLocationPreviewHint}>
-                      Shown only to you. Your exact coordinates are not stored in the blood request.
-                    </Text>
-                  </View>
-                </View>
-              ) : null}
             </View>
           </View>
 
@@ -2976,7 +2972,6 @@ const styles = StyleSheet.create({
   requestBodyScreen: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingBottom: 100,
   },
   stepRow: {
     flexDirection: 'row',
@@ -3217,39 +3212,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
     lineHeight: 20,
-  },
-  currentLocationPreview: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#fff7f5',
-    borderWidth: 1,
-    borderColor: '#ead7d3',
-  },
-  currentLocationPreviewText: {
-    flex: 1,
-  },
-  currentLocationPreviewTitle: {
-    color: '#59413e',
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-  },
-  currentLocationPreviewValue: {
-    color: '#191c1e',
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  currentLocationPreviewHint: {
-    color: '#8d706d',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 3,
   },
   scheduleRow: {
     flexDirection: 'row',
