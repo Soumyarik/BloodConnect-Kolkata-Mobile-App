@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
@@ -51,18 +51,19 @@ export function NotificationsScreen({
   onOpenRequest: (requestId: string) => void;
 }) {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const loadNotifications = async (showLoading = false) => {
-    if (!user) return;
+  const loadNotifications = useCallback(async (showLoading = false) => {
+    if (!userId) return;
     if (showLoading) setLoading(true);
 
     const result = await supabase
       .from('notifications')
       .select('id, type, title, message, request_id, response_id, read_at, created_at')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -75,22 +76,26 @@ export function NotificationsScreen({
     setItems((result.data || []) as NotificationItem[]);
     setErrorMessage('');
     if (showLoading) setLoading(false);
-  };
+  }, [userId]);
 
   useEffect(() => {
-    void loadNotifications(true);
+    const initialLoad = setTimeout(() => {
+      void loadNotifications(true);
+    }, 0);
 
-    if (!user) return;
+    if (!userId) {
+      return () => clearTimeout(initialLoad);
+    }
 
     const channel = supabase
-      .channel('bloodconnect-notifications-' + user.id)
+      .channel('bloodconnect-notifications-' + userId)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          filter: 'user_id=eq.' + user.id,
+          filter: 'user_id=eq.' + userId,
         },
         (payload) => {
           const row = payload.new as NotificationItem;
@@ -104,10 +109,11 @@ export function NotificationsScreen({
     }, 8000);
 
     return () => {
+      clearTimeout(initialLoad);
       clearInterval(interval);
       void supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [loadNotifications, userId]);
 
   const markAsRead = async (item: NotificationItem) => {
     if (item.read_at || !user) return;
