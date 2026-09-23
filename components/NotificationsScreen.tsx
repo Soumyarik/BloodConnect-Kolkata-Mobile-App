@@ -1,9 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../utils/supabase';
+import { showMessage } from '../utils/interaction';
 
 type NotificationItem = {
   id: string;
@@ -125,7 +126,7 @@ export function NotificationsScreen({
       .eq('user_id', user.id);
 
     if (result.error) {
-      Alert.alert('Unable to update notification', result.error.message);
+      showMessage('Unable to update notification', result.error.message);
       return;
     }
 
@@ -149,7 +150,7 @@ export function NotificationsScreen({
       .eq('user_id', user.id);
 
     if (result.error) {
-      Alert.alert('Unable to mark notifications read', result.error.message);
+      showMessage('Unable to mark notifications read', result.error.message);
       return;
     }
 

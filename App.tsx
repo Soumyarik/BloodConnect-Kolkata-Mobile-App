@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
-  Linking,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -23,11 +23,71 @@ import { supabase } from './utils/supabase';
 import * as Location from 'expo-location';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 import { NotificationsScreen } from './components/NotificationsScreen';
+import { openAppSettings, openExternalUrl, showMessage } from './utils/interaction';
 
 const heroImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDNwv9RW78-JfebQWjT2TUScOmIeBnv3NQXDzTuiciY9uZbrJJkyU4Lg8ByPzzTeSg1dUxAueLjxliDQkm4u65_yKtzsQu2bgK5cGwsWwyxopzRSbuUdbD2UPIf9rs1v-HqTtXyhxJH1WjNBbdYznIrigrooMsZYL0KqfnT1vz_IoxcjQaTAPpjkpq3fJf5MWxH-5LMdheTkRypPl4e2fBRNSzam2IrIocXg206shWo16lHVyeujyPUfA';
 const logoImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuCBSk6a55NuwAytbnzJJPnsRtAfy8KaH9s2AX5xnGC1tMryE2hrKW2bKPuZHfxU-LghrmXOvWZSoOzRatbsAAy6w_4p3XBtBj1tf10-TlKq9uDbbHHAIFEFx7xMF-d7AhjHMHZylGhaGwlmPmOhnzvpw7VRog9pXWIQPdOpq5H2dHA0ng97Ly18mZRdGDB1N0zlbdWpM89e6lcz6m2U-V4Y7BIYzhS8fo4qKCG4YdXJ5jy8apzX0Ebj_A';
+
+type IncomingDonorRequest = {
+  responseId: string;
+  requestId: string;
+  patientName: string;
+  bloodGroup: string;
+  unitsRequired: number;
+  hospitalName: string;
+  city: string;
+  area: string;
+  requiredDate: string | null;
+  requiredTime: string | null;
+  isEmergency: boolean;
+  requestStatus: string;
+  responseStatus: string;
+  createdAt: string;
+};
+
+type IncomingDonorRequestRow = {
+  response_id: string; request_id: string; patient_name: string; blood_group: string;
+  units_required: number; hospital_name: string; city: string; area: string;
+  required_date: string | null; required_time: string | null; is_emergency: boolean;
+  request_status: string; response_status: string; created_at: string;
+};
+
+const mapIncomingRequest = (row: IncomingDonorRequestRow): IncomingDonorRequest => ({
+  responseId: row.response_id, requestId: row.request_id, patientName: row.patient_name,
+  bloodGroup: row.blood_group, unitsRequired: row.units_required, hospitalName: row.hospital_name,
+  city: row.city, area: row.area, requiredDate: row.required_date, requiredTime: row.required_time,
+  isEmergency: row.is_emergency, requestStatus: row.request_status,
+  responseStatus: row.response_status, createdAt: row.created_at,
+});
+
+type OpenBloodRequest = {
+  id: string;
+  bloodGroup: string;
+  unitsRequired: number;
+  hospitalName: string;
+  city: string;
+  area: string;
+  requiredDate: string | null;
+  requiredTime: string | null;
+  isEmergency: boolean;
+  status: string;
+  createdAt: string;
+};
+
+type OpenBloodRequestRow = {
+  id: string; blood_group: string; units_required: number; hospital_name: string;
+  city: string; area: string | null; required_date: string | null; required_time: string | null;
+  is_emergency: boolean; status: string; created_at: string;
+};
+
+const mapOpenBloodRequest = (row: OpenBloodRequestRow): OpenBloodRequest => ({
+  id: row.id, bloodGroup: row.blood_group, unitsRequired: row.units_required,
+  hospitalName: row.hospital_name, city: row.city, area: row.area || '',
+  requiredDate: row.required_date, requiredTime: row.required_time,
+  isEmergency: row.is_emergency, status: row.status, createdAt: row.created_at,
+});
 
 function HomeScreen({
   onRequestBlood,
@@ -44,17 +104,22 @@ function HomeScreen({
 }) {
   const { user } = useAuth();
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [incomingRequest, setIncomingRequest] = useState<IncomingDonorRequest | null>(null);
 
   useEffect(() => {
     let mounted = true;
     const loadUnread = async () => {
       if (!user) return;
-      const result = await supabase
+      const [result, inbox] = await Promise.all([supabase
         .from('notifications')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
-        .is('read_at', null);
+        .is('read_at', null), supabase.rpc('get_donor_inbox')]);
       if (mounted && !result.error) setUnreadNotifications(result.count || 0);
+      if (mounted && !inbox.error) {
+        const pending = ((inbox.data || []) as IncomingDonorRequestRow[]).map(mapIncomingRequest).find((item) => item.responseStatus === 'pending');
+        setIncomingRequest(pending || null);
+      }
     };
     void loadUnread();
     const interval = setInterval(() => void loadUnread(), 8000);
@@ -86,9 +151,9 @@ function HomeScreen({
                 </View>
               ) : null}
             </Pressable>
-            <View style={styles.avatar}>
+            <Pressable style={styles.avatar} onPress={onProfile} accessibilityLabel="Open profile">
               <MaterialCommunityIcons name="account" size={18} color="#ffffff" />
-            </View>
+            </Pressable>
           </View>
         </View>
       </View>
@@ -159,20 +224,20 @@ function HomeScreen({
             <Pressable onPress={onRequests} accessibilityLabel="View all urgent requests"><Text style={styles.sectionLink}>View All</Text></Pressable>
           </View>
 
-          <View style={styles.requestCard}>
+          {incomingRequest ? <View style={styles.requestCard}>
             <View style={styles.requestBody}>
-              <Text style={styles.bloodBadge}>O+</Text>
+              <Text style={styles.bloodBadge}>{incomingRequest.bloodGroup}</Text>
 
               <View style={styles.requestInfo}>
                 <View style={styles.statusRow}>
-                  <Text style={styles.urgentBadge}>URGENT</Text>
-                  <Text style={styles.unitsText}>• 2 units required</Text>
+                  {incomingRequest.isEmergency ? <Text style={styles.urgentBadge}>URGENT</Text> : null}
+                  <Text style={styles.unitsText}>• {incomingRequest.unitsRequired} units required</Text>
                 </View>
 
-                <Text style={styles.requestLocation}>AMRI Hospital, Kolkata</Text>
+                <Text style={styles.requestLocation}>{incomingRequest.hospitalName}, {incomingRequest.city || 'Kolkata'}</Text>
                 <Text style={styles.requestMeta}>
                   <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#59413e" />
-                  {' '}Posted 25 mins ago
+                  {' '}{[incomingRequest.area, incomingRequest.city].filter(Boolean).join(', ')}
                 </Text>
               </View>
             </View>
@@ -180,7 +245,7 @@ function HomeScreen({
             <Pressable style={styles.secondaryButton} onPress={onRequests} accessibilityLabel="Respond to urgent request">
               <Text style={styles.secondaryButtonText}>Respond</Text>
             </Pressable>
-          </View>
+          </View> : <View style={styles.requestCard}><Text style={styles.requestLocation}>No pending blood requests have been sent to you.</Text><Pressable style={styles.secondaryButton} onPress={onRequests}><Text style={styles.secondaryButtonText}>View Requests</Text></Pressable></View>}
         </View>
       </ScrollView>
 
@@ -344,44 +409,40 @@ function FindDonorScreen({
     }
   }, [selectedBlood, requestId]);
 
+  const sendDonorRequest = async (donor: Donor) => {
+    if (!requestId) return;
+    setSendingDonorId(donor.id);
+    setErrorMessage('');
+    try {
+      const result = await supabase.rpc('send_donor_request', {
+        p_request_id: requestId,
+        p_donor_id: donor.id,
+      });
+      if (result.error) throw new Error(result.error.message);
+      setSentStatusByDonor((current) => ({ ...current, [donor.id]: 'pending' }));
+      showMessage('Request sent', donor.name + ' has received your blood-help request.');
+    } catch (error) {
+      setErrorMessage('Unable to send request: ' + (error instanceof Error ? error.message : 'Please try again.'));
+    } finally {
+      setSendingDonorId(null);
+    }
+  };
+
   const requestDonor = (donor: Donor) => {
     if (!requestId) {
-      Alert.alert(
-        'Open a blood request first',
-        'Go to Requests, open one of your blood requests, then choose Find Compatible Donors.',
-      );
+      showMessage('Open a blood request first', 'Go to Requests, open one of your blood requests, then choose Find Compatible Donors.');
       return;
     }
 
-    Alert.alert(
-      'Request ' + donor.name + '?',
-      donor.blood + ' donor in ' + (donor.area || donor.city) + '. The donor will receive a pending blood-help request and must respond before they are considered accepted.',
-      [
+    const message = donor.blood + ' donor in ' + (donor.area || donor.city) + '. The donor will receive a pending blood-help request and must respond before they are considered accepted.';
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Request ' + donor.name + '?\n\n' + message)) void sendDonorRequest(donor);
+      return;
+    }
+    Alert.alert('Request ' + donor.name + '?', message, [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send Request',
-          onPress: async () => {
-            setSendingDonorId(donor.id);
-            setErrorMessage('');
-
-            const result = await supabase.rpc('send_donor_request', {
-              p_request_id: requestId,
-              p_donor_id: donor.id,
-            });
-
-            if (result.error) {
-              setErrorMessage('Unable to send request: ' + result.error.message);
-              setSendingDonorId(null);
-              return;
-            }
-
-            setSentStatusByDonor((current) => ({ ...current, [donor.id]: 'pending' }));
-            setSendingDonorId(null);
-            Alert.alert('Request sent', donor.name + ' has received your blood-help request.');
-          },
-        },
-      ],
-    );
+        { text: 'Send Request', onPress: () => void sendDonorRequest(donor) },
+      ]);
   };
 
   return (
@@ -399,9 +460,10 @@ function FindDonorScreen({
           <Pressable
             style={styles.findDonorHeaderIcon}
             onPress={() =>
-              void Linking.openURL(
+              void openExternalUrl(
                 'https://www.google.com/maps/search/?api=1&query=' +
                   encodeURIComponent('Kolkata, West Bengal'),
+                'open Google Maps',
               )
             }
             accessibilityLabel="Open Kolkata map"
@@ -509,7 +571,7 @@ function FindDonorScreen({
                   {requestId ? (
                     <Pressable
                       style={[styles.donorRequestButton, responseStatus && styles.donorRequestButtonDisabled]}
-                      disabled={Boolean(responseStatus) || sendingDonorId === donor.id}
+                      disabled={responseStatus === 'pending' || responseStatus === 'accepted' || sendingDonorId === donor.id}
                       onPress={() => requestDonor(donor)}
                     >
                       <Text style={styles.donorRequestText}>
@@ -593,18 +655,37 @@ type BloodRequestRow = {
 };
 
 type BloodRequestConnectionRow = {
-  request_id: string; patient_name: string | null; blood_group: string; units_required: number;
-  hospital_name: string; hospital_address: string | null; city: string; area: string | null;
-  required_date: string | null; required_time: string | null; status: string; is_emergency: boolean;
-  requester_phone: string | null; is_requester: boolean; accepted_donor_id: string | null;
-  donor_name: string | null; donor_phone: string | null; donor_blood_group: string | null;
-  donor_city: string | null; donor_area: string | null;
+  request_id: string;
+  patient_name: string | null;
+  blood_group: string;
+  units_required: number;
+  hospital_name: string;
+  hospital_address: string | null;
+  city: string;
+  area: string | null;
+  required_date: string | null;
+  required_time: string | null;
+  is_emergency: boolean;
+  status: string;
+  requester_phone: string;
+  is_requester: boolean;
+  accepted_donor_id: string | null;
+  donor_name: string | null;
+  donor_phone: string | null;
+  donor_blood_group: string | null;
+  donor_city: string | null;
+  donor_area: string | null;
 };
 
 type BloodRequestConnection = {
-  isRequester: boolean; requesterPhone: string | null; selectedDonorId: string | null;
-  donorName: string | null; donorPhone: string | null; donorBloodGroup: string | null;
-  donorCity: string | null; donorArea: string | null;
+  isRequester: boolean;
+  requesterPhone: string;
+  selectedDonorId: string | null;
+  donorName: string | null;
+  donorPhone: string | null;
+  donorBloodGroup: string | null;
+  donorCity: string | null;
+  donorArea: string | null;
 };
 
 const toBloodRequest = (row: BloodRequestRow): BloodRequest => ({
@@ -629,23 +710,6 @@ const formatRequestDeadline = (request: BloodRequest) => {
 };
 
 
-type IncomingDonorRequest = {
-  responseId: string;
-  requestId: string;
-  patientName: string;
-  bloodGroup: string;
-  unitsRequired: number;
-  hospitalName: string;
-  city: string;
-  area: string;
-  requiredDate: string | null;
-  requiredTime: string | null;
-  isEmergency: boolean;
-  requestStatus: string;
-  responseStatus: string;
-  createdAt: string;
-};
-
 function RequestsScreen({
   onHome,
   onProfile,
@@ -658,6 +722,8 @@ function RequestsScreen({
   const { user } = useAuth();
   const [requests, setRequests] = useState<BloodRequest[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<IncomingDonorRequest[]>([]);
+  const [openRequests, setOpenRequests] = useState<OpenBloodRequest[]>([]);
+  const [selectedOpenRequest, setSelectedOpenRequest] = useState<OpenBloodRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [respondingId, setRespondingId] = useState<string | null>(null);
@@ -673,13 +739,15 @@ function RequestsScreen({
       return;
     }
 
-    const [ownResult, inboxResult] = await Promise.all([
+    const [ownResult, inboxResult, openResult] = await Promise.all([
       supabase
         .from('blood_requests')
         .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
         .eq('requester_id', userData.user.id)
+        .neq('status', 'cancelled')
         .order('created_at', { ascending: false }),
       supabase.rpc('get_donor_inbox'),
+      supabase.rpc('get_open_blood_requests_for_donor'),
     ]);
 
     if (ownResult.error) {
@@ -695,7 +763,13 @@ function RequestsScreen({
           : 'Donor inbox unavailable: ' + inboxResult.error.message,
       );
     } else {
-      setIncomingRequests((inboxResult.data || []) as IncomingDonorRequest[]);
+      setIncomingRequests(((inboxResult.data || []) as IncomingDonorRequestRow[]).map(mapIncomingRequest));
+    }
+
+    if (openResult.error) {
+      setErrorMessage((current) => current ? current + ' | Nearby requests: ' + openResult.error.message : 'Nearby requests unavailable: ' + openResult.error.message);
+    } else {
+      setOpenRequests(((openResult.data || []) as OpenBloodRequestRow[]).map(mapOpenBloodRequest));
     }
 
     setLoading(false);
@@ -734,12 +808,54 @@ function RequestsScreen({
     );
     setRespondingId(null);
 
-    Alert.alert(
+    showMessage(
       status === 'accepted' ? 'Donation request accepted' : 'Request declined',
       status === 'accepted'
         ? 'The requester can now see that you accepted. Hospital screening is still required before donation is confirmed.'
         : 'The requester has been notified that you are unavailable.',
     );
+  };
+
+  const withdrawAcceptance = async (item: IncomingDonorRequest) => {
+    setRespondingId(item.responseId);
+    setErrorMessage('');
+    try {
+      const result = await supabase.rpc('withdraw_donor_response', { p_response_id: item.responseId });
+      if (result.error) throw new Error(result.error.message);
+      setIncomingRequests((current) => current.map((entry) => entry.responseId === item.responseId ? { ...entry, responseStatus: 'withdrawn' } : entry));
+    } catch (error) {
+      setErrorMessage('Unable to withdraw this response: ' + (error instanceof Error ? error.message : 'Please try again.'));
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const confirmWithdraw = (item: IncomingDonorRequest) => {
+    const message = 'You will become unavailable for this response. The requester will be notified.';
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Withdraw acceptance?\n\n' + message)) void withdrawAcceptance(item);
+      return;
+    }
+    Alert.alert('Withdraw acceptance?', message, [
+      { text: 'Keep acceptance', style: 'cancel' },
+      { text: 'Withdraw', style: 'destructive', onPress: () => void withdrawAcceptance(item) },
+    ]);
+  };
+
+  const respondToOpenRequest = async (item: OpenBloodRequest) => {
+    setRespondingId(item.id);
+    setErrorMessage('');
+    try {
+      const result = await supabase.rpc('respond_to_open_blood_request', { p_request_id: item.id });
+      if (result.error) throw new Error(result.error.message);
+      setSelectedOpenRequest(null);
+      showMessage('You can help', 'The requester has been notified that you can help.');
+      onRequestDetails(item.id);
+    } catch (error) {
+      setErrorMessage('Unable to respond to this request: ' + (error instanceof Error ? error.message : 'Please try again.'));
+    } finally {
+      setRespondingId(null);
+    }
   };
 
   return (
@@ -756,7 +872,12 @@ function RequestsScreen({
         </Pressable>
       </View>
 
-      <ScrollView style={styles.requestsListScroll} contentContainerStyle={styles.requestsListContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.requestsListScroll}
+        contentContainerStyle={styles.requestsListContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void loadRequests()} tintColor="#760009" colors={['#760009']} />}
+      >
         {errorMessage ? <Text style={styles.profileErrorText}>{errorMessage}</Text> : null}
 
         {loading ? (
@@ -800,6 +921,30 @@ function RequestsScreen({
                 <Text style={styles.emptyStateText}>Your blood requests will appear here.</Text>
               </View>
             )}
+
+            <Text style={styles.requestsSectionTitle}>Open Blood Requests Near You</Text>
+            <Text style={styles.requestsSectionSubtitle}>Compatible requests in your city. Only hospital and approximate area details are shown.</Text>
+            {openRequests.length > 0 ? openRequests.map((item) => (
+              <View key={item.id} style={styles.incomingRequestCard}>
+                <View style={styles.mockRequestTopRow}>
+                  <View style={styles.mockRequestBloodBadge}><Text style={styles.mockRequestBloodText}>{item.bloodGroup}</Text></View>
+                  <View style={styles.mockRequestCopy}>
+                    <View style={styles.mockRequestStatusRow}>
+                      {item.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
+                      <Text style={styles.openStatusBadge}>{item.unitsRequired} {item.unitsRequired === 1 ? 'UNIT' : 'UNITS'}</Text>
+                    </View>
+                    <Text style={styles.mockRequestPatient}>{item.hospitalName}</Text>
+                    <Text style={styles.findDonorMeta}>{[item.area, item.city].filter(Boolean).join(', ')}</Text>
+                    <Text style={styles.findDonorMeta}>Needed: {[item.requiredDate, item.requiredTime].filter(Boolean).join(', ') || 'As soon as possible'}</Text>
+                  </View>
+                </View>
+                <View style={styles.incomingActions}>
+                  <Pressable style={styles.donorRequestButton} onPress={() => setSelectedOpenRequest(item)}>
+                    <Text style={styles.donorRequestText}>View Request</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )) : <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="map-search-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>No compatible open requests nearby</Text><Text style={styles.detailsMuted}>New requests in your city that match your blood group will appear here.</Text></View></View>}
 
             <Text style={styles.requestsSectionTitle}>Requests For You</Text>
             <Text style={styles.requestsSectionSubtitle}>
@@ -879,52 +1024,21 @@ function RequestsScreen({
                         </View>
 
                         {item.responseStatus === 'accepted' ? (
-                          <>
+                          <View style={styles.incomingActions}>
                             <Pressable style={styles.detailsSecondaryButton} onPress={() => onRequestDetails(item.requestId)}>
                               <Text style={styles.detailsSecondaryText}>View Donation Details</Text>
                             </Pressable>
                             <Pressable
                               style={styles.donorWithdrawButton}
-                            disabled={respondingId === item.responseId}
-                            onPress={() => {
-                              Alert.alert(
-                                'Withdraw acceptance?',
-                                'You will become unavailable for this response. The requester will be notified.',
-                                [
-                                  { text: 'Keep acceptance', style: 'cancel' },
-                                  {
-                                    text: 'Withdraw',
-                                    style: 'destructive',
-                                    onPress: async () => {
-                                      setRespondingId(item.responseId);
-                                      setErrorMessage('');
-                                      const result = await supabase.rpc('withdraw_donor_response', {
-                                        p_response_id: item.responseId,
-                                      });
-                                      if (result.error) {
-                                        setErrorMessage('Unable to withdraw this response: ' + result.error.message);
-                                      } else {
-                                        setIncomingRequests((current) =>
-                                          current.map((entry) =>
-                                            entry.responseId === item.responseId
-                                              ? { ...entry, responseStatus: 'withdrawn' }
-                                              : entry,
-                                          ),
-                                        );
-                                      }
-                                      setRespondingId(null);
-                                    },
-                                  },
-                                ],
-                              );
-                            }}
-                          >
-                            <MaterialCommunityIcons name="backup-restore" size={17} color="#760009" />
-                            <Text style={styles.donorWithdrawText}>
-                              {respondingId === item.responseId ? 'Please wait...' : 'Withdraw Acceptance'}
-                            </Text>
+                              disabled={respondingId === item.responseId}
+                              onPress={() => confirmWithdraw(item)}
+                            >
+                              <MaterialCommunityIcons name="backup-restore" size={17} color="#760009" />
+                              <Text style={styles.donorWithdrawText}>
+                                {respondingId === item.responseId ? 'Please wait...' : 'Withdraw Acceptance'}
+                              </Text>
                             </Pressable>
-                          </>
+                          </View>
                         ) : null}
                       </>
                     )}
@@ -945,6 +1059,32 @@ function RequestsScreen({
           </>
         )}
       </ScrollView>
+
+      <Modal visible={Boolean(selectedOpenRequest)} transparent animationType="slide" onRequestClose={() => setSelectedOpenRequest(null)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Open Blood Request</Text>
+            {selectedOpenRequest ? <>
+              <View style={styles.mockRequestStatusRow}>
+                <Text style={styles.mockRequestBloodText}>{selectedOpenRequest.bloodGroup}</Text>
+                <Text style={styles.profileValueText}>{selectedOpenRequest.unitsRequired} {selectedOpenRequest.unitsRequired === 1 ? 'unit' : 'units'} required</Text>
+                {selectedOpenRequest.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
+              </View>
+              <Text style={styles.profileModalLabel}>Hospital</Text>
+              <Text style={styles.profileValueText}>{selectedOpenRequest.hospitalName}</Text>
+              <Text style={styles.profileModalLabel}>Approximate area</Text>
+              <Text style={styles.profileValueText}>{[selectedOpenRequest.area, selectedOpenRequest.city].filter(Boolean).join(', ')}</Text>
+              <Text style={styles.profileModalLabel}>Required by</Text>
+              <Text style={styles.profileValueText}>{[selectedOpenRequest.requiredDate, selectedOpenRequest.requiredTime].filter(Boolean).join(', ') || 'As soon as possible'}</Text>
+              <Text style={styles.profileFinePrint}>Requester contact details and exact coordinates are private. The requester will be notified if you offer to help.</Text>
+              <View style={styles.profileModalActions}>
+                <Pressable style={styles.profileModalCancel} onPress={() => setSelectedOpenRequest(null)}><Text style={styles.profileModalCancelText}>Close</Text></Pressable>
+                <Pressable style={styles.profileModalSave} disabled={respondingId === selectedOpenRequest.id} onPress={() => void respondToOpenRequest(selectedOpenRequest)}><Text style={styles.profileModalSaveText}>{respondingId === selectedOpenRequest.id ? 'Sending...' : 'I Can Help'}</Text></Pressable>
+              </View>
+            </> : null}
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
@@ -987,6 +1127,7 @@ function BloodRequestDetailsScreen({
   const detailsScrollRef = useRef<ScrollView>(null);
   const [donorResponsesY, setDonorResponsesY] = useState(0);
   const [editRequestVisible, setEditRequestVisible] = useState(false);
+  const [requestOptionsVisible, setRequestOptionsVisible] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editDraft, setEditDraft] = useState({
     patientName: '',
@@ -1013,32 +1154,48 @@ function BloodRequestDetailsScreen({
       return;
     }
 
-    const [{ data: connectionData, error: connectionError }, { data: responseData, error: responseError }] = await Promise.all([
+    const [connectionResult, { data: responseData, error: responseError }] = await Promise.all([
       supabase.rpc('get_blood_request_connection_details', { p_request_id: requestId }).maybeSingle(),
-      supabase.from('donor_responses').select('id, donor_id, status, created_at').eq('request_id', requestId).order('created_at', { ascending: true }),
+      supabase
+        .from('donor_responses')
+        .select('id, donor_id, status, created_at')
+        .eq('request_id', requestId)
+        .order('created_at', { ascending: true }),
     ]);
 
-    if (connectionError || !connectionData) {
+    if (connectionResult.error || !connectionResult.data) {
       setRequest(null);
       setConnectionDetails(null);
-      setErrorMessage(`Unable to load request: ${connectionError?.message || 'This request is not available to your account.'}`);
+      setErrorMessage(`Unable to load request: ${connectionResult.error?.message || 'This request is not available to your account.'}`);
       setLoading(false);
       return;
     }
 
-    const row = connectionData as BloodRequestConnectionRow;
+    const row = connectionResult.data as BloodRequestConnectionRow;
     setRequest({
-      id: row.request_id, patientName: row.patient_name || '', bloodGroup: row.blood_group,
-      unitsRequired: row.units_required, hospitalName: row.hospital_name,
-      hospitalAddress: row.hospital_address || '', city: row.city, area: row.area || '',
-      requiredDate: row.required_date, requiredTime: row.required_time, status: row.status,
-      isEmergency: row.is_emergency, contactPhone: row.requester_phone || '',
+      id: row.request_id,
+      patientName: row.patient_name || '',
+      bloodGroup: row.blood_group,
+      unitsRequired: row.units_required,
+      hospitalName: row.hospital_name,
+      hospitalAddress: row.hospital_address || '',
+      city: row.city,
+      area: row.area || '',
+      requiredDate: row.required_date,
+      requiredTime: row.required_time,
+      status: row.status,
+      isEmergency: row.is_emergency,
+      contactPhone: row.requester_phone,
     });
     setConnectionDetails({
-      isRequester: row.is_requester, requesterPhone: row.requester_phone,
-      selectedDonorId: row.accepted_donor_id, donorName: row.donor_name,
-      donorPhone: row.donor_phone, donorBloodGroup: row.donor_blood_group,
-      donorCity: row.donor_city, donorArea: row.donor_area,
+      isRequester: row.is_requester,
+      requesterPhone: row.requester_phone,
+      selectedDonorId: row.accepted_donor_id,
+      donorName: row.donor_name,
+      donorPhone: row.donor_phone,
+      donorBloodGroup: row.donor_blood_group,
+      donorCity: row.donor_city,
+      donorArea: row.donor_area,
     });
 
     if (responseError) {
@@ -1067,7 +1224,7 @@ function BloodRequestDetailsScreen({
   const openEditRequest = () => {
     if (!request) return;
     if (request.status !== 'open') {
-      Alert.alert('Request already matched', 'This request can only be fully edited while it is still open. Manage the active donor workflow from the request details.');
+      showMessage('Request already matched', 'This request can only be fully edited while it is still open. Manage the active donor workflow from the request details.');
       return;
     }
     setEditDraft({
@@ -1089,7 +1246,7 @@ function BloodRequestDetailsScreen({
   const saveEditedRequest = async () => {
     if (!request) return;
     if (!editDraft.patientName.trim() || !editDraft.hospitalName.trim() || !editDraft.hospitalAddress.trim() || !editDraft.contactPhone.trim()) {
-      Alert.alert('Missing details', 'Patient name, hospital, address and contact number are required.');
+      showMessage('Missing details', 'Patient name, hospital, address and contact number are required.');
       return;
     }
 
@@ -1134,7 +1291,7 @@ function BloodRequestDetailsScreen({
     setEditRequestVisible(false);
     setEditSaving(false);
     await refreshRequest(false);
-    Alert.alert('Request updated', 'Your blood request has been updated.');
+    showMessage('Request updated', 'Your blood request has been updated.');
   };
 
   const cancelRequest = async () => {
@@ -1147,31 +1304,45 @@ function BloodRequestDetailsScreen({
     setRequest({ ...request, status: 'cancelled' });
   };
 
-  const openExternal = async (url: string, action: string) => {
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-      const message = `Unable to ${action}: ${error instanceof Error ? error.message : 'Please try again.'}`;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(message);
-      else Alert.alert('Unable to open link', message);
+  const confirmCancelRequest = () => {
+    const message = 'Are you sure you want to cancel this request?';
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(message)) {
+        void cancelRequest();
+      }
+      return;
     }
+
+    Alert.alert('Cancel Request', message, [
+      { text: 'Keep Open', style: 'cancel' },
+      { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() },
+    ]);
   };
 
   const callContact = (phone: string | null, person: string) => {
-    if (!phone) { Alert.alert('Phone unavailable', `${person}'s phone number is not available.`); return; }
-    void openExternal('tel:' + phone, `call ${person}`);
+    if (!phone) {
+      showMessage('Phone unavailable', `${person}'s phone number is not available.`);
+      return;
+    }
+    void openExternalUrl('tel:' + phone, `call ${person}`);
   };
 
   const whatsappContact = (phone: string | null, person: string) => {
     const digits = phone?.replace(/\D/g, '') || '';
-    if (!digits) { Alert.alert('WhatsApp unavailable', `${person}'s phone number is not available.`); return; }
-    void openExternal('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits), `contact ${person} on WhatsApp`);
+    if (!digits) {
+      showMessage('WhatsApp unavailable', `${person}'s phone number is not available.`);
+      return;
+    }
+    void openExternalUrl('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits), `contact ${person} on WhatsApp`);
   };
 
   const openHospitalDirections = () => {
     if (!request) return;
     const destination = [request.hospitalName, request.hospitalAddress, request.city].filter(Boolean).join(', ');
-    void openExternal('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(destination), 'open hospital directions in Google Maps');
+    void openExternalUrl(
+      'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(destination),
+      'open hospital directions in Google Maps',
+    );
   };
 
   if (loading) {
@@ -1194,16 +1365,7 @@ function BloodRequestDetailsScreen({
           <Text style={styles.detailsTitle}>Blood Request Details</Text>
           {connectionDetails?.isRequester ? <Pressable
             style={styles.detailsIconButton}
-            onPress={() =>
-              Alert.alert('Request options', 'Choose an action', [
-                { text: 'Refresh', onPress: () => void refreshRequest(false) },
-                { text: 'Find Compatible Donors', onPress: onFindDonor },
-                { text: 'Edit Request', onPress: openEditRequest },
-                request.status !== 'cancelled' && request.status !== 'fulfilled'
-                  ? { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }
-                  : { text: 'Close', style: 'cancel' },
-              ])
-            }
+            onPress={() => setRequestOptionsVisible(true)}
             accessibilityLabel="More options"
           >
             <MaterialCommunityIcons name="dots-vertical" size={22} color="#191c1e" />
@@ -1238,7 +1400,7 @@ function BloodRequestDetailsScreen({
         <View style={styles.detailsCard}>
           <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="account-alert" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Patient Information</Text></View>
           <View style={styles.detailsGrid}>
-            {connectionDetails?.isRequester ? <View><Text style={styles.detailsLabel}>Patient Name</Text><Text style={styles.detailsValue}>{request.patientName}</Text></View> : null}
+            {connectionDetails?.isRequester && request.patientName ? <View><Text style={styles.detailsLabel}>Patient Name</Text><Text style={styles.detailsValue}>{request.patientName}</Text></View> : null}
             <View><Text style={styles.detailsLabel}>Blood Group</Text><Text style={styles.detailsAccentValue}>O Positive ({request.bloodGroup})</Text></View>
             <View><Text style={styles.detailsLabel}>Units Required</Text><Text style={styles.detailsValue}>{request.unitsRequired} Units</Text></View>
             <View><Text style={styles.detailsLabel}>Required By</Text><Text style={styles.detailsValue}>{formatRequestDeadline(request)}</Text></View>
@@ -1255,7 +1417,9 @@ function BloodRequestDetailsScreen({
           </View>
           <Pressable
             style={styles.detailsSecondaryButton}
-            onPress={openHospitalDirections}
+            onPress={() =>
+              openHospitalDirections()
+            }
           >
             <MaterialCommunityIcons name="map-outline" size={18} color="#760009" /><Text style={styles.detailsSecondaryText}>View Hospital Location</Text>
           </Pressable>
@@ -1276,14 +1440,24 @@ function BloodRequestDetailsScreen({
                   <View><Text style={styles.detailsLabel}>Approximate area</Text><Text style={styles.detailsValue}>{[connectionDetails.donorArea, connectionDetails.donorCity].filter(Boolean).join(', ') || 'Kolkata'}</Text></View>
                 </View>
                 <View style={styles.incomingActions}>
-                  <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails.donorPhone, 'donor')}><Text style={styles.donorRequestText}>Call Donor</Text></Pressable>
-                  <Pressable style={styles.donorRequestButtonSecondary} onPress={() => whatsappContact(connectionDetails.donorPhone, 'donor')}><Text style={styles.donorRequestButtonSecondaryText}>WhatsApp Donor</Text></Pressable>
+                  <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails.donorPhone, 'donor')}>
+                    <Text style={styles.donorRequestText}>Call Donor</Text>
+                  </Pressable>
+                  <Pressable style={styles.donorRequestButtonSecondary} onPress={() => whatsappContact(connectionDetails.donorPhone, 'donor')}>
+                    <Text style={styles.donorRequestButtonSecondaryText}>WhatsApp Donor</Text>
+                  </Pressable>
                 </View>
               </>
             ) : donorResponses.some((item) => item.status === 'accepted') ? (
-              <><Text style={styles.detailsValue}>An eligible donor has accepted.</Text><Text style={styles.detailsMuted}>Donor contact details appear here after you select an accepted donor.</Text></>
+              <>
+                <Text style={styles.detailsValue}>An eligible donor has accepted.</Text>
+                <Text style={styles.detailsMuted}>Donor contact details appear here after you select an accepted donor.</Text>
+              </>
             ) : (
-              <><Text style={styles.detailsValue}>Waiting for donor acceptance</Text><Text style={styles.detailsMuted}>No personal contact details are shared until a donor accepts.</Text></>
+              <>
+                <Text style={styles.detailsValue}>Waiting for donor acceptance</Text>
+                <Text style={styles.detailsMuted}>No personal contact details are shared until a donor accepts.</Text>
+              </>
             )
           ) : (
             <>
@@ -1296,8 +1470,12 @@ function BloodRequestDetailsScreen({
                 <View><Text style={styles.detailsLabel}>Required by</Text><Text style={styles.detailsValue}>{formatRequestDeadline(request)}</Text></View>
               </View>
               <View style={styles.incomingActions}>
-                <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails?.requesterPhone || null, 'requester')}><Text style={styles.donorRequestText}>Call Requester</Text></Pressable>
-                <Pressable style={styles.donorRequestButtonSecondary} onPress={openHospitalDirections}><Text style={styles.donorRequestButtonSecondaryText}>Open in Google Maps</Text></Pressable>
+                <Pressable style={styles.donorRequestButton} onPress={() => callContact(connectionDetails?.requesterPhone || null, 'requester')}>
+                  <Text style={styles.donorRequestText}>Call Requester</Text>
+                </Pressable>
+                <Pressable style={styles.donorRequestButtonSecondary} onPress={openHospitalDirections}>
+                  <Text style={styles.donorRequestButtonSecondaryText}>Open in Google Maps</Text>
+                </Pressable>
               </View>
             </>
           )}
@@ -1310,7 +1488,7 @@ function BloodRequestDetailsScreen({
             <Text style={styles.stepBadge}>Live status</Text>
           </View>
           {[
-            ['check', 'Request Created', 'Your blood request is open.', true],
+            ['check', 'Request Created', connectionDetails?.isRequester ? 'Your blood request is open.' : 'This blood request is open.', true],
             ['account-group', 'Donor Responses (' + donorResponses.length + ')', donorResponses.length ? 'Donor invitations and responses are shown below.' : 'No donor responses yet.', donorResponses.length > 0],
             ['heart-outline', 'Donor Accepted', donorResponses.some((item) => item.status === 'accepted') ? 'A donor has accepted. Hospital screening is still required.' : 'Waiting for a donor to accept.', donorResponses.some((item) => item.status === 'accepted')],
             ['circle-outline', 'Medical Screening', 'Pending hospital screening.', false],
@@ -1363,26 +1541,48 @@ function BloodRequestDetailsScreen({
         <DonationWorkflowCard requestId={request.id} />
 
         {connectionDetails?.isRequester ? <>
-        <Pressable style={styles.detailsPrimaryButton} onPress={onFindDonor}>
-          <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
-          <Text style={styles.detailsPrimaryText}>Find Compatible Donors</Text>
-        </Pressable>
-        <Pressable
-          style={styles.detailsSecondaryButton}
-          onPress={() => detailsScrollRef.current?.scrollTo({ y: Math.max(0, donorResponsesY - 20), animated: true })}
-        >
-          <MaterialCommunityIcons name="account-group" size={18} color="#191c1e" />
-          <Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text>
-        </Pressable>
-        <View style={styles.detailsButtonRow}>
-          <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status !== 'open'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
-          <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Cancel Request', 'Are you sure you want to cancel this request?', [{ text: 'Keep Open', style: 'cancel' }, { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }])}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
-        </View>
+          <Pressable style={styles.detailsPrimaryButton} onPress={onFindDonor}>
+            <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
+            <Text style={styles.detailsPrimaryText}>Find Compatible Donors</Text>
+          </Pressable>
+          <Pressable
+            style={styles.detailsSecondaryButton}
+            onPress={() => detailsScrollRef.current?.scrollTo({ y: Math.max(0, donorResponsesY - 20), animated: true })}
+          >
+            <MaterialCommunityIcons name="account-group" size={18} color="#191c1e" />
+            <Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text>
+          </Pressable>
+          <View style={styles.detailsButtonRow}>
+            <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status !== 'open'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
+            <Pressable style={styles.detailsHalfButton} onPress={confirmCancelRequest}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
+          </View>
         </> : null}
 
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="truck-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>Hospital Pickup Information</Text><Text style={styles.detailsMuted}>Pickup information is available only for verified hospitals or authorized partners in Kolkata.</Text></View></View>
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="shield-check-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>BloodConnect Privacy Guarantee</Text><Text style={styles.detailsMuted}>Exact donor location and personal contact information are shared only with appropriate consent.</Text></View></View>
       </ScrollView>
+
+      <Modal visible={Boolean(connectionDetails?.isRequester && requestOptionsVisible)} transparent animationType="fade" onRequestClose={() => setRequestOptionsVisible(false)}>
+        <Pressable style={styles.profileModalBackdrop} onPress={() => setRequestOptionsVisible(false)}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Request options</Text>
+            {[
+              { icon: 'refresh', label: 'Refresh', action: () => void refreshRequest(false) },
+              { icon: 'account-search', label: 'Find Compatible Donors', action: onFindDonor },
+              { icon: 'pencil-outline', label: 'Edit Request', action: openEditRequest },
+              ...(request.status !== 'cancelled' && request.status !== 'fulfilled' ? [{ icon: 'close-circle-outline', label: 'Cancel Request', action: confirmCancelRequest }] : []),
+            ].map(({ icon, label, action }) => (
+              <Pressable key={label} style={styles.profileSettingRow} onPress={() => { setRequestOptionsVisible(false); action(); }}>
+                <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#760009" />
+                <Text style={styles.profileValueText}>{label}</Text>
+              </Pressable>
+            ))}
+            <Pressable style={styles.profileModalCancel} onPress={() => setRequestOptionsVisible(false)}>
+              <Text style={styles.profileModalCancelText}>Close</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal visible={editRequestVisible} transparent animationType="slide" onRequestClose={() => setEditRequestVisible(false)}>
         <View style={styles.profileModalBackdrop}>
@@ -1467,15 +1667,18 @@ function ProfileScreen({
   onHome,
   onRequests,
   onNotifications,
+  onOpenRequest,
   onSignOut,
 }: {
   onHome: () => void;
   onRequests: () => void;
   onNotifications: () => void;
+  onOpenRequest: (requestId: string) => void;
   onSignOut: () => Promise<void>;
 }) {
   const { user, createProfile } = useAuth();
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [latestRequest, setLatestRequest] = useState<BloodRequest | null>(null);
   const [draftProfile, setDraftProfile] = useState<ProfileData>({
     name: '',
     phone: '',
@@ -1512,6 +1715,16 @@ function ProfileScreen({
       .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, emergency_contact_name, emergency_contact_phone')
       .eq('id', userData.user.id)
       .maybeSingle();
+
+    const latestRequestResult = await supabase
+      .from('blood_requests')
+      .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
+      .eq('requester_id', userData.user.id)
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLatestRequest(!latestRequestResult.error && latestRequestResult.data ? toBloodRequest(latestRequestResult.data as BloodRequestRow) : null);
 
     if (error) {
       setProfileError(`Unable to load your profile: ${error.message}`);
@@ -1598,7 +1811,7 @@ function ProfileScreen({
 
   const saveEmergencyContact = async () => {
     if (!draftContact.name.trim() || !draftContact.phone.trim() || !draftContact.relationship.trim()) {
-      Alert.alert('Missing details', 'Please complete all emergency contact fields.');
+      showMessage('Missing details', 'Please complete all emergency contact fields.');
       return;
     }
     setSaving(true);
@@ -1668,46 +1881,46 @@ function ProfileScreen({
       return;
     }
     if (label === 'Location Permissions') {
-      await Linking.openSettings();
+      await openAppSettings();
       return;
     }
     if (label === 'WhatsApp Preferences' || label === 'WhatsApp') {
       const digits = profile.phone.replace(/\D/g, '');
       if (!digits) {
-        Alert.alert('WhatsApp', 'Add your phone number in Edit Profile first.');
+        showMessage('WhatsApp', 'Add your phone number in Edit Profile first.');
         return;
       }
-      await Linking.openURL('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits));
+      await openExternalUrl('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits), 'open WhatsApp');
       return;
     }
     if (label === 'Phone Number') {
       if (!profile.phone) {
-        Alert.alert('Phone number', 'Add your phone number in Edit Profile first.');
+        showMessage('Phone number', 'Add your phone number in Edit Profile first.');
         return;
       }
-      await Linking.openURL('tel:' + profile.phone);
+      await openExternalUrl('tel:' + profile.phone, 'open the phone dialer');
       return;
     }
     if (label === 'Privacy' || label === 'Privacy Settings') {
-      Alert.alert(
+      showMessage(
         'BloodConnect Privacy',
         'Your donor home address is not shown to other users. Exact donor location and personal contact details are shared only with appropriate consent.',
       );
       return;
     }
     if (label === 'Location Sharing') {
-      Alert.alert(
+      showMessage(
         'Location Sharing',
         'BloodConnect shows approximate donor area before acceptance. Exact donor location is not shared publicly.',
       );
       return;
     }
     if (label === 'Help & Support') {
-      Alert.alert('Help & Support', 'Use Requests and Profile to manage blood-help activity. For account issues, contact your BloodConnect administrator.');
+      showMessage('Help & Support', 'Use Requests and Profile to manage blood-help activity. For account issues, contact your BloodConnect administrator.');
       return;
     }
     if (label === 'About BloodConnect') {
-      Alert.alert('About BloodConnect', 'BloodConnect — Kolkata blood donation coordination app.');
+      showMessage('About BloodConnect', 'BloodConnect — Kolkata blood donation coordination app.');
     }
   };
 
@@ -1721,7 +1934,7 @@ function ProfileScreen({
       .order('donation_date', { ascending: false });
 
     if (result.error) {
-      Alert.alert('Donation History', result.error.message);
+      showMessage('Donation History', result.error.message);
       return;
     }
 
@@ -1732,7 +1945,7 @@ function ProfileScreen({
       notes: string | null;
     }>;
 
-    Alert.alert(
+    showMessage(
       'Donation History',
       rows.length
         ? rows
@@ -1852,22 +2065,22 @@ function ProfileScreen({
         <View style={styles.profileCard}>
           <View style={styles.profileCardHeadingRow}>
             <Text style={styles.profileSectionTitle}>My Blood Requests</Text>
-            <Text style={styles.profileStatusPill}>Active</Text>
+            {latestRequest ? <Text style={styles.profileStatusPill}>{latestRequest.status}</Text> : null}
           </View>
-          <View style={styles.profileRequestPreview}>
+          {latestRequest ? <View style={styles.profileRequestPreview}>
             <View style={styles.profileRequestTopRow}>
-              <Text style={styles.profileRequestBlood}>{profile.bloodGroup}</Text>
-              <Text style={styles.profileRequestUnits}>2 units required</Text>
+              <Text style={styles.profileRequestBlood}>{latestRequest.bloodGroup}</Text>
+              <Text style={styles.profileRequestUnits}>{latestRequest.unitsRequired} units required</Text>
             </View>
             <View style={styles.profileLocationRow}>
               <MaterialCommunityIcons name="hospital" size={16} color="#59413e" />
-              <Text style={styles.profileMutedText}>AMRI Hospital, Kolkata</Text>
+              <Text style={styles.profileMutedText}>{latestRequest.hospitalName}, {latestRequest.city}</Text>
             </View>
-          </View>
+          </View> : <Text style={styles.profileMutedText}>You have no active blood requests.</Text>}
           <View style={styles.profileButtonRow}>
-            <Pressable style={styles.profilePrimaryButtonSmall} onPress={onRequests}>
+            {latestRequest ? <Pressable style={styles.profilePrimaryButtonSmall} onPress={() => onOpenRequest(latestRequest.id)}>
               <Text style={styles.profilePrimaryButtonText}>View Request</Text>
-            </Pressable>
+            </Pressable> : null}
             <Pressable style={styles.profileSecondaryButton} onPress={onRequests}>
               <Text style={styles.profileSecondaryButtonText}>View All</Text>
             </Pressable>
@@ -1913,19 +2126,7 @@ function ProfileScreen({
 
         <View style={styles.profileCard}>
           <Text style={styles.profileSectionTitle}>Donation History</Text>
-          {[
-            ['March 2026', 'Blood donation at AMRI Hospital'],
-            ['December 2025', 'Blood donation at City Blood Bank'],
-          ].map(([date, description]) => (
-            <View key={date} style={styles.profileHistoryRow}>
-              <View style={styles.profileHistoryDot} />
-              <View>
-                <Text style={styles.profileAccentText}>{date}</Text>
-                <Text style={styles.profileValueText}>{description}</Text>
-                <Text style={styles.profileConnectedText}>Status: Completed</Text>
-              </View>
-            </View>
-          ))}
+          <Text style={styles.profileMutedText}>Verified donation records from your account appear here.</Text>
           <Pressable style={styles.profileSecondaryButtonFull} onPress={() => void loadDonationHistory()}>
             <Text style={styles.profileSecondaryButtonText}>View Full History</Text>
           </Pressable>
@@ -2159,7 +2360,7 @@ function RequestBloodScreen({
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
-        Alert.alert('Location permission needed', 'Allow BloodConnect to use your location while the app is open to fill the request location.');
+        showMessage('Location permission needed', 'Allow BloodConnect to use your location while the app is open to fill the request location.');
         return;
       }
 
@@ -2183,17 +2384,17 @@ function RequestBloodScreen({
 
       if (label) {
         setLocation(label);
-        Alert.alert('Location added', 'The approximate current area has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
+        showMessage('Location added', 'The approximate current area has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
       } else {
         const currentLocation = location.trim();
         const fallbackLocation = currentLocation && currentLocation !== 'Current location'
           ? currentLocation
           : 'Kolkata, West Bengal';
         setLocation(fallbackLocation);
-        Alert.alert('Address lookup unavailable', 'Your location was detected, but this platform could not convert it to an area name. The field shows an approximate fallback; enter the hospital locality before submitting.');
+      showMessage('Address lookup unavailable', 'Your location was detected, but this platform could not convert it to an area name. The field shows an approximate fallback; enter the hospital locality before submitting.');
       }
     } catch (error) {
-      Alert.alert('Unable to get location', error instanceof Error ? error.message : 'Please try again.');
+      showMessage('Unable to get location', error instanceof Error ? error.message : 'Please try again.');
     }
   };
 
@@ -2212,11 +2413,11 @@ function RequestBloodScreen({
 
   const saveSchedule = () => {
     if (scheduleDateDraft && !/^\d{4}-\d{2}-\d{2}$/.test(scheduleDateDraft)) {
-      Alert.alert('Invalid date', 'Use YYYY-MM-DD.');
+      showMessage('Invalid date', 'Use YYYY-MM-DD.');
       return;
     }
     if (scheduleTimeDraft && !/^\d{2}:\d{2}$/.test(scheduleTimeDraft)) {
-      Alert.alert('Invalid time', 'Use HH:MM.');
+      showMessage('Invalid time', 'Use HH:MM.');
       return;
     }
     setRequiredDate(scheduleDateDraft);
@@ -2226,7 +2427,7 @@ function RequestBloodScreen({
 
   const handleSubmit = async () => {
     if (!patientName.trim() || !hospitalName.trim() || !location.trim() || !phone.trim()) {
-      Alert.alert('Missing details', 'Please complete the patient, hospital and contact information.');
+      showMessage('Missing details', 'Please complete the patient, hospital and contact information.');
       return;
     }
 
@@ -2274,7 +2475,12 @@ function RequestBloodScreen({
     setRequiredTime('');
     setLocationCoords(null);
     setSaving(false);
-    Alert.alert('Request submitted', 'Your blood request has been saved.', [{ text: 'View Requests', onPress: onRequests }]);
+    if (Platform.OS === 'web') {
+      showMessage('Request submitted', 'Your blood request has been saved.');
+      onRequests();
+    } else {
+      Alert.alert('Request submitted', 'Your blood request has been saved.', [{ text: 'View Requests', onPress: onRequests }]);
+    }
   };
 
   return (
@@ -4210,6 +4416,20 @@ function AppContent() {
   const { session, loading, signIn, signUp, signOut } = useAuth();
   const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor' | 'notifications'>('home');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [requestDetailsReturnScreen, setRequestDetailsReturnScreen] = useState<'requests' | 'notifications' | 'profile'>('requests');
+  const [findDonorReturnScreen, setFindDonorReturnScreen] = useState<'home' | 'requestDetails'>('home');
+  const [notificationsReturnScreen, setNotificationsReturnScreen] = useState<'home' | 'profile'>('home');
+  const goHome = () => { setSelectedRequestId(null); setScreen('home'); };
+  const goRequests = () => { setSelectedRequestId(null); setScreen('requests'); };
+  const goProfile = () => { setSelectedRequestId(null); setScreen('profile'); };
+  const openFindDonorFromHome = () => { setSelectedRequestId(null); setFindDonorReturnScreen('home'); setScreen('findDonor'); };
+  const openFindDonorFromDetails = () => { setFindDonorReturnScreen('requestDetails'); setScreen('findDonor'); };
+  const openNotifications = (source: 'home' | 'profile') => { setNotificationsReturnScreen(source); setScreen('notifications'); };
+  const openRequestDetails = (requestId: string, source: 'requests' | 'notifications' | 'profile') => {
+    setRequestDetailsReturnScreen(source);
+    setSelectedRequestId(requestId);
+    setScreen('requestDetails');
+  };
 
   if (loading) {
     return (
@@ -4227,10 +4447,10 @@ function AppContent() {
     return (
       <HomeScreen
         onRequestBlood={() => setScreen('request')}
-        onFindDonor={() => setScreen('findDonor')}
-        onRequests={() => setScreen('requests')}
-        onProfile={() => setScreen('profile')}
-        onNotifications={() => setScreen('notifications')}
+        onFindDonor={openFindDonorFromHome}
+        onRequests={goRequests}
+        onProfile={goProfile}
+        onNotifications={() => openNotifications('home')}
       />
     );
   }
@@ -4238,14 +4458,11 @@ function AppContent() {
   if (screen === 'notifications') {
     return (
       <NotificationsScreen
-        onBack={() => setScreen('home')}
-        onHome={() => setScreen('home')}
-        onRequests={() => setScreen('requests')}
-        onProfile={() => setScreen('profile')}
-        onOpenRequest={(requestId) => {
-          setSelectedRequestId(requestId);
-          setScreen('requestDetails');
-        }}
+        onBack={() => setScreen(notificationsReturnScreen)}
+        onHome={goHome}
+        onRequests={goRequests}
+        onProfile={goProfile}
+        onOpenRequest={(requestId) => openRequestDetails(requestId, 'notifications')}
       />
     );
   }
@@ -4253,10 +4470,10 @@ function AppContent() {
   if (screen === 'request') {
     return (
       <RequestBloodScreen
-        onBack={() => setScreen('home')}
-        onHome={() => setScreen('home')}
-        onRequests={() => setScreen('requests')}
-        onProfile={() => setScreen('profile')}
+        onBack={goHome}
+        onHome={goHome}
+        onRequests={goRequests}
+        onProfile={goProfile}
       />
     );
   }
@@ -4264,12 +4481,9 @@ function AppContent() {
   if (screen === 'requests') {
     return (
       <RequestsScreen
-        onHome={() => setScreen('home')}
-        onProfile={() => setScreen('profile')}
-        onRequestDetails={(requestId) => {
-          setSelectedRequestId(requestId);
-          setScreen('requestDetails');
-        }}
+        onHome={goHome}
+        onProfile={goProfile}
+        onRequestDetails={(requestId) => openRequestDetails(requestId, 'requests')}
       />
     );
   }
@@ -4277,11 +4491,11 @@ function AppContent() {
   if (screen === 'requestDetails') {
     return (
       <BloodRequestDetailsScreen
-        onBack={() => setScreen('requests')}
-        onHome={() => setScreen('home')}
-        onRequests={() => setScreen('requests')}
-        onProfile={() => setScreen('profile')}
-        onFindDonor={() => setScreen('findDonor')}
+      onBack={() => setScreen(requestDetailsReturnScreen)}
+        onHome={goHome}
+        onRequests={goRequests}
+        onProfile={goProfile}
+        onFindDonor={openFindDonorFromDetails}
         requestId={selectedRequestId || ''}
       />
     );
@@ -4290,10 +4504,10 @@ function AppContent() {
   if (screen === 'findDonor') {
     return (
       <FindDonorScreen
-        onBack={() => setScreen(selectedRequestId ? 'requestDetails' : 'home')}
-        onHome={() => setScreen('home')}
-        onRequests={() => setScreen('requests')}
-        onProfile={() => setScreen('profile')}
+        onBack={() => setScreen(findDonorReturnScreen)}
+        onHome={goHome}
+        onRequests={goRequests}
+        onProfile={goProfile}
         requestId={selectedRequestId}
       />
     );
@@ -4301,9 +4515,10 @@ function AppContent() {
 
   return (
     <ProfileScreen
-      onHome={() => setScreen('home')}
-      onRequests={() => setScreen('requests')}
-      onNotifications={() => setScreen('notifications')}
+      onHome={goHome}
+      onRequests={goRequests}
+      onNotifications={() => openNotifications('profile')}
+      onOpenRequest={(requestId) => openRequestDetails(requestId, 'profile')}
       onSignOut={async () => {
         const result = await signOut();
         if (result.error) throw result.error;

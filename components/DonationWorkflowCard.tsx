@@ -1,9 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../utils/supabase';
+import { showMessage } from '../utils/interaction';
 
 type WorkflowStage =
   | 'accepted'
@@ -159,16 +160,23 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
 
     await refresh(false);
     setBusy(false);
-    Alert.alert('Donor selected', 'The selected donor is now on the post-acceptance donation workflow.');
+    showMessage('Donor selected', 'The selected donor is now on the post-acceptance donation workflow.');
   };
 
   const advance = async (nextStage: WorkflowStage) => {
     if (!workflow) return;
 
     if (nextStage === 'eligible') {
+      const message = 'Only mark this stage after hospital medical staff confirm that the donor is medically eligible to donate.';
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.confirm('Hospital confirmation required\n\n' + message)) {
+          await performAdvance(nextStage);
+        }
+        return;
+      }
       Alert.alert(
         'Hospital confirmation required',
-        'Only mark this stage after hospital medical staff confirm that the donor is medically eligible to donate.',
+        message,
         [
           { text: 'Cancel', style: 'cancel' },
           {
