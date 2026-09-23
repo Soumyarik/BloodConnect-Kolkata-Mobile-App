@@ -816,7 +816,10 @@ function BloodRequestDetailsScreen({
           )}
         </View>
 
-        <Pressable style={styles.detailsPrimaryButton} onPress={() => Alert.alert('Donate', 'Your donor response will be connected to Supabase later.')}><MaterialCommunityIcons name="hand-heart" size={22} color="#ffffff" /><Text style={styles.detailsPrimaryText}>I Can Donate</Text></Pressable>
+        <Pressable style={styles.detailsPrimaryButton} onPress={onFindDonor}>
+          <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
+          <Text style={styles.detailsPrimaryText}>Find Compatible Donors</Text>
+        </Pressable>
         <Pressable style={styles.detailsSecondaryButton} onPress={() => Alert.alert('Donor Responses', 'Donor response actions will be connected later.')}><MaterialCommunityIcons name="account-group" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text></Pressable>
         <View style={styles.detailsButtonRow}>
           <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Edit Request', 'Request editing will be connected later.')}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
