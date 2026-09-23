@@ -169,60 +169,181 @@ function HomeScreen({
   );
 }
 
+
 type Donor = {
+  id: string;
   name: string;
   blood: string;
-  distance: string;
-  lastDonation: string;
+  city: string;
+  area: string;
   available: boolean;
 };
 
-const mockDonors: Donor[] = [
-  {
-    name: 'Rahul S.',
-    blood: 'O+',
-    distance: 'Approx. 2.1 km away',
-    lastDonation: '3 months ago',
-    available: true,
-  },
-  {
-    name: 'Ananya M.',
-    blood: 'O+',
-    distance: 'Approx. 4.5 km away',
-    lastDonation: '6 months ago',
-    available: true,
-  },
-];
+const compatibleBloodGroups = (recipientGroup: string) => {
+  switch (recipientGroup) {
+    case 'O+': return ['O+', 'O-'];
+    case 'O-': return ['O-'];
+    case 'A+': return ['A+', 'A-', 'O+', 'O-'];
+    case 'A-': return ['A-', 'O-'];
+    case 'B+': return ['B+', 'B-', 'O+', 'O-'];
+    case 'B-': return ['B-', 'O-'];
+    case 'AB+': return ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+    case 'AB-': return ['A-', 'B-', 'AB-', 'O-'];
+    default: return [recipientGroup];
+  }
+};
 
 function FindDonorScreen({
   onBack,
   onHome,
   onRequests,
   onProfile,
+  requestId,
 }: {
   onBack: () => void;
   onHome: () => void;
   onRequests: () => void;
   onProfile: () => void;
+  requestId?: string | null;
 }) {
   const [selectedBlood, setSelectedBlood] = useState('O+');
-  const [radius, setRadius] = useState('10 km');
-  const [requestSentDonor, setRequestSentDonor] = useState<Donor | null>(null);
-  const [showEmptyState, setShowEmptyState] = useState(false);
+  const [request, setRequest] = useState<BloodRequest | null>(null);
+  const [donors, setDonors] = useState<Donor[]>([]);
+  const [sentStatusByDonor, setSentStatusByDonor] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [sendingDonorId, setSendingDonorId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const visibleDonors = showEmptyState
-    ? []
-    : mockDonors.filter((donor) => donor.blood === selectedBlood && donor.available);
+  const loadDonors = async (bloodGroup: string, currentRequest: BloodRequest | null) => {
+    const result = await supabase.rpc('get_available_donors', {
+      p_blood_groups: compatibleBloodGroups(bloodGroup),
+      p_city: currentRequest?.city || 'Kolkata',
+    });
+
+    if (result.error) {
+      setErrorMessage('Unable to load available donors: ' + result.error.message);
+      setDonors([]);
+      return;
+    }
+
+    const rows = (result.data || []) as Array<{
+      id: string;
+      full_name: string;
+      blood_group: string;
+      city: string;
+      area: string;
+      donor_available: boolean;
+    }>;
+
+    setDonors(
+      rows.map((row) => ({
+        id: row.id,
+        name: row.full_name || 'BloodConnect Donor',
+        blood: row.blood_group,
+        city: row.city || currentRequest?.city || 'Kolkata',
+        area: row.area || '',
+        available: row.donor_available,
+      })),
+    );
+  };
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadData = async () => {
+      setLoading(true);
+      setErrorMessage('');
+
+      if (requestId) {
+        const result = await supabase
+          .from('blood_requests')
+          .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
+          .eq('id', requestId)
+          .maybeSingle();
+
+        if (!mounted) return;
+        if (result.error || !result.data) {
+          setErrorMessage(result.error?.message || 'The selected blood request could not be loaded.');
+          setLoading(false);
+          return;
+        }
+
+        const mapped = toBloodRequest(result.data as BloodRequestRow);
+        setRequest(mapped);
+        setSelectedBlood(mapped.bloodGroup);
+
+        const responseResult = await supabase
+          .from('donor_responses')
+          .select('donor_id, status')
+          .eq('request_id', requestId);
+
+        if (!mounted) return;
+
+        if (!responseResult.error) {
+          const nextStatuses: Record<string, string> = {};
+          (responseResult.data || []).forEach((row) => {
+            nextStatuses[row.donor_id] = row.status;
+          });
+          setSentStatusByDonor(nextStatuses);
+        }
+
+        await loadDonors(mapped.bloodGroup, mapped);
+      } else {
+        await loadDonors(selectedBlood, null);
+      }
+
+      if (mounted) setLoading(false);
+    };
+
+    void loadData();
+    return () => {
+      mounted = false;
+    };
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!requestId) {
+      setLoading(true);
+      setErrorMessage('');
+      void loadDonors(selectedBlood, null).finally(() => setLoading(false));
+    }
+  }, [selectedBlood, requestId]);
 
   const requestDonor = (donor: Donor) => {
+    if (!requestId) {
+      Alert.alert(
+        'Open a blood request first',
+        'Go to Requests, open one of your blood requests, then choose Find Compatible Donors.',
+      );
+      return;
+    }
+
     Alert.alert(
-      `Request ${donor.name}?`,
-      `Send a blood-help request for ${donor.blood} blood at the hospital. The donor must respond before they are considered accepted.`,
+      'Request ' + donor.name + '?',
+      donor.blood + ' donor in ' + (donor.area || donor.city) + '. The donor will receive a pending blood-help request and must respond before they are considered accepted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Send Request',
-          onPress: () => setRequestSentDonor(donor),
+          onPress: async () => {
+            setSendingDonorId(donor.id);
+            setErrorMessage('');
+
+            const result = await supabase.rpc('send_donor_request', {
+              p_request_id: requestId,
+              p_donor_id: donor.id,
+            });
+
+            if (result.error) {
+              setErrorMessage('Unable to send request: ' + result.error.message);
+              setSendingDonorId(null);
+              return;
+            }
+
+            setSentStatusByDonor((current) => ({ ...current, [donor.id]: 'pending' }));
+            setSendingDonorId(null);
+            Alert.alert('Request sent', donor.name + ' has received your blood-help request.');
+          },
         },
       ],
     );
@@ -234,7 +355,7 @@ function FindDonorScreen({
 
       <View style={styles.findDonorHeader}>
         <View style={styles.findDonorHeaderLeft}>
-          <Pressable style={styles.requestBackButton} onPress={onBack} accessibilityLabel="Go back to home">
+          <Pressable style={styles.requestBackButton} onPress={onBack} accessibilityLabel="Go back">
             <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
           </Pressable>
           <Text style={styles.requestTitle}>Find Donor</Text>
@@ -249,64 +370,35 @@ function FindDonorScreen({
         </View>
       </View>
 
-      <ScrollView
-        style={styles.findDonorScroll}
-        contentContainerStyle={styles.findDonorContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.findDonorSubtitle}>
-          Find a compatible donor near you - connect with nearby available donors safely.
-        </Text>
-
-        <View style={styles.findDonorCard}>
-          <View style={styles.findDonorLocationRow}>
-            <View style={styles.findDonorLocationInfo}>
-              <View style={styles.findDonorIconCircle}>
-                <MaterialCommunityIcons name="map-marker" size={20} color="#760009" />
-              </View>
-              <View>
-                <Text style={styles.findDonorLabel}>Current Location</Text>
-                <Text style={styles.findDonorLocation}>Kolkata, West Bengal</Text>
-              </View>
-            </View>
-            <Pressable onPress={() => Alert.alert('Location', 'Location selection will connect to a location service later.')}>
-              <Text style={styles.findDonorChange}>Change</Text>
-            </Pressable>
+      <ScrollView style={styles.findDonorScroll} contentContainerStyle={styles.findDonorContent} showsVerticalScrollIndicator={false}>
+        {request ? (
+          <View style={styles.findDonorCard}>
+            <Text style={styles.findDonorLabel}>Blood request</Text>
+            <Text style={styles.findDonorLocation}>{request.patientName}</Text>
+            <Text style={styles.findDonorMeta}>
+              {request.bloodGroup} • {request.unitsRequired} units • {request.hospitalName}
+            </Text>
+            <Text style={styles.findDonorMeta}>
+              {[request.area, request.city].filter(Boolean).join(', ')} • {formatRequestDeadline(request)}
+            </Text>
           </View>
-
-          <View style={styles.findDonorMetaRow}>
-            <Text style={styles.findDonorMeta}>Searching within {radius} radius</Text>
-            <Text style={styles.findDonorActive}>{visibleDonors.length} Donors Active</Text>
-          </View>
-
-          <View style={styles.chipRow}>
-            {['5 km', '10 km', '25 km', '50 km'].map((option) => (
-              <Pressable
-                key={option}
-                onPress={() => setRadius(option)}
-                style={[styles.filterChip, radius === option && styles.filterChipSelected]}
-              >
-                <Text style={[styles.filterChipText, radius === option && styles.filterChipTextSelected]}>
-                  {option}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        ) : (
+          <Text style={styles.findDonorSubtitle}>
+            Select a blood request first to send a real request to a registered donor.
+          </Text>
+        )}
 
         <View style={styles.findDonorSectionHeader}>
-          <Text style={styles.findDonorSectionTitle}>Select Blood Group</Text>
-          <Text style={styles.findDonorLabel}>Tap to filter</Text>
+          <Text style={styles.findDonorSectionTitle}>Compatible Blood Groups</Text>
+          <Text style={styles.findDonorLabel}>{requestId ? 'Locked to this request' : 'Tap to filter'}</Text>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bloodChoiceRow}>
           {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => (
             <Pressable
               key={group}
-              onPress={() => {
-                setSelectedBlood(group);
-                setShowEmptyState(false);
-              }}
+              disabled={Boolean(requestId)}
+              onPress={() => setSelectedBlood(group)}
               style={[styles.bloodChoice, selectedBlood === group && styles.bloodChoiceSelected]}
             >
               <Text style={[styles.bloodChoiceText, selectedBlood === group && styles.bloodChoiceTextSelected]}>
@@ -318,131 +410,92 @@ function FindDonorScreen({
 
         <View style={styles.compatibilityNote}>
           <MaterialCommunityIcons name="information-outline" size={16} color="#760009" />
-          <Text style={styles.compatibilityText}>Compatible blood groups highlighted based on patient requirement.</Text>
+          <Text style={styles.compatibilityText}>
+            Donors come from registered profiles marked as available. Exact home address is never shown.
+          </Text>
         </View>
 
-        <View style={styles.filterRow}>
-          <Pressable style={styles.smallFilter} onPress={() => setShowEmptyState((current) => !current)}>
-            <MaterialCommunityIcons name="check-circle" size={16} color="#760009" />
-            <Text style={styles.smallFilterText}>{showEmptyState ? 'Show Available' : 'Available Now'}</Text>
-          </Pressable>
-          <Pressable style={styles.smallFilter} onPress={() => setRadius('5 km')}>
-            <MaterialCommunityIcons name="near-me" size={16} color="#760009" />
-            <Text style={styles.smallFilterText}>Distance: Nearest</Text>
-          </Pressable>
-          <View style={styles.smallFilter}>
-            <MaterialCommunityIcons name="history" size={16} color="#760009" />
-            <Text style={styles.smallFilterText}>Last Donation</Text>
-          </View>
-        </View>
+        {errorMessage ? <Text style={styles.profileErrorText}>{errorMessage}</Text> : null}
 
-        {requestSentDonor ? (
-          <View style={styles.acceptedCard}>
-            <View style={styles.acceptedHeader}>
-              <View style={styles.acceptedTitleRow}>
-                <MaterialCommunityIcons name="clock-outline" size={24} color="#760009" />
-                <Text style={styles.findDonorSectionTitle}>Request Sent</Text>
-              </View>
-              <Text style={styles.confirmedBadge}>Pending</Text>
-            </View>
-            <Text style={styles.acceptedText}>
-              Your request has been sent to {requestSentDonor.name}. The donor must respond before they are considered accepted. Blood is not confirmed until the donor responds and completes the required hospital screening.
-            </Text>
-            <View style={styles.acceptedActions}>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Waiting for donor', 'Contact details will be available only after the donor accepts your request.')}>
-                <MaterialCommunityIcons name="phone-outline" size={20} color="#760009" />
-                <Text style={styles.acceptedActionText}>Call</Text>
-              </Pressable>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Waiting for donor', 'WhatsApp contact will be available only after the donor accepts your request.')}>
-                <MaterialCommunityIcons name="message-text-outline" size={20} color="#760009" />
-                <Text style={styles.acceptedActionText}>WhatsApp</Text>
-              </Pressable>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Location not available', 'Live location sharing starts only after the donor accepts and explicitly chooses to share their location.')}>
-                <MaterialCommunityIcons name="map-marker-outline" size={20} color="#760009" />
-                <Text style={styles.acceptedActionText}>Track</Text>
-              </Pressable>
-            </View>
-            <View style={styles.locationPrivacyBox}>
-              <MaterialCommunityIcons name="lock" size={18} color="#59413e" />
-              <Text style={styles.locationPrivacyText}>Exact location is shared only if the donor explicitly chooses to share it.</Text>
-            </View>
-            <View style={styles.pickupRow}>
-              <View style={styles.pickupTextWrap}>
-                <Text style={styles.pickupTitle}>Need Hospital Pickup?</Text>
-                <Text style={styles.findDonorMeta}>Verified hospitals can request cab support for donors.</Text>
-              </View>
-              <Pressable style={styles.requestPickupButton} onPress={() => Alert.alert('Hospital Pickup', 'Pickup support will be connected to verified hospitals later. It does not confirm donor availability.')}>
-                <Text style={styles.requestPickupText}>Request Pickup</Text>
-              </Pressable>
+        <View style={styles.findDonorResults}>
+          <View style={styles.findDonorResultsHeader}>
+            <View>
+              <Text style={styles.findDonorSectionTitle}>Registered Available Donors</Text>
+              <Text style={styles.findDonorLabel}>
+                {request ? 'Matching donors in ' + (request.city || 'Kolkata') : 'Registered donors in Kolkata'}
+              </Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.findDonorResults}>
-            <View style={styles.findDonorResultsHeader}>
-              <View>
-                <Text style={styles.findDonorSectionTitle}>Available Donors</Text>
-                <Text style={styles.findDonorLabel}>{visibleDonors.length} compatible donors found near you</Text>
-              </View>
-              <Text style={styles.updatedText}>Updated just now</Text>
-            </View>
 
-            {visibleDonors.length > 0 ? (
-              visibleDonors.map((donor) => (
-                <View key={donor.name} style={styles.donorCard}>
+          {loading ? (
+            <Text style={styles.authLoadingText}>Loading donors...</Text>
+          ) : donors.length > 0 ? (
+            donors.map((donor) => {
+              const responseStatus = sentStatusByDonor[donor.id];
+
+              return (
+                <View key={donor.id} style={styles.donorCard}>
                   <View style={styles.donorHeader}>
                     <View style={styles.donorAvatar}>
                       <MaterialCommunityIcons name="account" size={28} color="#59413e" />
                       <View style={styles.onlineDot} />
                     </View>
+
                     <View style={styles.donorInfo}>
                       <View style={styles.donorNameRow}>
                         <Text style={styles.donorName}>{donor.name}</Text>
                         <Text style={styles.donorBlood}>{donor.blood}</Text>
                       </View>
-                      <Text style={styles.donorMeta}>{donor.distance}</Text>
-                      <Text style={styles.donorMeta}>Last donated: {donor.lastDonation}</Text>
+                      <Text style={styles.donorMeta}>
+                        Approximate area: {donor.area || donor.city || 'Kolkata'}
+                      </Text>
+                      <Text style={styles.donorMeta}>Available to donate</Text>
                     </View>
-                    <Text style={styles.availableBadge}>Available Now</Text>
+
+                    <Text style={styles.availableBadge}>Available</Text>
                   </View>
+
                   <View style={styles.privacyNotice}>
                     <MaterialCommunityIcons name="lock" size={18} color="#8d706d" />
-                    <Text style={styles.privacyText}>Exact address hidden. Location details are shared only after donor acceptance.</Text>
+                    <Text style={styles.privacyText}>
+                      Exact address and personal contact details remain private until appropriate consent.
+                    </Text>
                   </View>
-                  <View style={styles.donorActions}>
-                    <Pressable style={styles.donorActionButton} onPress={() => Alert.alert('Call Donor', 'Calling is available after verified contact details are shared.')}>
-                      <MaterialCommunityIcons name="phone" size={18} color="#191c1e" />
-                      <Text style={styles.donorActionText}>Call</Text>
+
+                  {requestId ? (
+                    <Pressable
+                      style={[styles.donorRequestButton, responseStatus && styles.donorRequestButtonDisabled]}
+                      disabled={Boolean(responseStatus) || sendingDonorId === donor.id}
+                      onPress={() => requestDonor(donor)}
+                    >
+                      <Text style={styles.donorRequestText}>
+                        {sendingDonorId === donor.id
+                          ? 'Sending...'
+                          : responseStatus === 'accepted'
+                            ? 'Accepted'
+                            : responseStatus === 'pending'
+                              ? 'Request Pending'
+                              : responseStatus === 'declined'
+                                ? 'Request Again'
+                                : 'Request Donor'}
+                      </Text>
                     </Pressable>
-                    <Pressable style={styles.donorActionButton} onPress={() => Alert.alert('WhatsApp', 'WhatsApp contact is available after donor acceptance.')}>
-                      <MaterialCommunityIcons name="message-text" size={18} color="#191c1e" />
-                      <Text style={styles.donorActionText}>WhatsApp</Text>
-                    </Pressable>
-                    <Pressable style={styles.donorRequestButton} onPress={() => requestDonor(donor)}>
-                      <Text style={styles.donorRequestText}>Request</Text>
-                    </Pressable>
-                  </View>
+                  ) : null}
                 </View>
-              ))
-            ) : (
-              <View style={styles.donorEmptyState}>
-                <View style={styles.donorEmptyIcon}>
-                  <MaterialCommunityIcons name="water" size={32} color="#760009" />
-                </View>
-                <Text style={styles.emptyStateTitle}>No compatible donors nearby</Text>
-                <Text style={styles.emptyStateText}>Try increasing your search radius or selecting another location.</Text>
-                <Pressable
-                  style={styles.donorRequestButtonFull}
-                  onPress={() => {
-                    setRadius('25 km');
-                    setShowEmptyState(false);
-                  }}
-                >
-                  <Text style={styles.donorRequestText}>Increase Search Radius to 25 km</Text>
-                </Pressable>
+              );
+            })
+          ) : (
+            <View style={styles.donorEmptyState}>
+              <View style={styles.donorEmptyIcon}>
+                <MaterialCommunityIcons name="water" size={32} color="#760009" />
               </View>
-            )}
-          </View>
-        )}
+              <Text style={styles.emptyStateTitle}>No registered compatible donors found</Text>
+              <Text style={styles.emptyStateText}>
+                Donors appear here only after they create a profile and mark themselves available to donate.
+              </Text>
+            </View>
+          )}
+        </View>
       </ScrollView>
 
       <View style={styles.bottomNav}>
@@ -516,37 +569,123 @@ const formatRequestDeadline = (request: BloodRequest) => {
   return [request.requiredDate, request.requiredTime].filter(Boolean).join(', ');
 };
 
-function RequestsScreen({ onHome, onProfile, onRequestDetails }: { onHome: () => void; onProfile: () => void; onRequestDetails: (requestId: string) => void }) {
+
+type IncomingDonorRequest = {
+  responseId: string;
+  requestId: string;
+  patientName: string;
+  bloodGroup: string;
+  unitsRequired: number;
+  hospitalName: string;
+  city: string;
+  area: string;
+  requiredDate: string | null;
+  requiredTime: string | null;
+  isEmergency: boolean;
+  requestStatus: string;
+  responseStatus: string;
+  createdAt: string;
+};
+
+function RequestsScreen({
+  onHome,
+  onProfile,
+  onRequestDetails,
+}: {
+  onHome: () => void;
+  onProfile: () => void;
+  onRequestDetails: (requestId: string) => void;
+}) {
+  const { user } = useAuth();
   const [requests, setRequests] = useState<BloodRequest[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<IncomingDonorRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadRequests = async () => {
-      setLoading(true);
-      setErrorMessage('');
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        if (mounted) {
-          setErrorMessage(userError?.message || 'You must be signed in to view requests.');
-          setLoading(false);
-        }
-        return;
-      }
-      const { data, error } = await supabase
+  const loadRequests = async () => {
+    setLoading(true);
+    setErrorMessage('');
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      setErrorMessage(userError?.message || 'You must be signed in to view requests.');
+      setLoading(false);
+      return;
+    }
+
+    const [ownResult, inboxResult] = await Promise.all([
+      supabase
         .from('blood_requests')
         .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
         .eq('requester_id', userData.user.id)
-        .order('created_at', { ascending: false });
-      if (!mounted) return;
-      if (error) setErrorMessage(`Unable to load requests: ${error.message}`);
-      else setRequests((data as BloodRequestRow[]).map(toBloodRequest));
-      setLoading(false);
-    };
+        .order('created_at', { ascending: false }),
+      supabase.rpc('get_donor_inbox'),
+    ]);
+
+    if (ownResult.error) {
+      setErrorMessage('Unable to load your requests: ' + ownResult.error.message);
+    } else {
+      setRequests((ownResult.data as BloodRequestRow[]).map(toBloodRequest));
+    }
+
+    if (inboxResult.error) {
+      setErrorMessage((current) =>
+        current
+          ? current + ' | Donor inbox: ' + inboxResult.error.message
+          : 'Donor inbox unavailable: ' + inboxResult.error.message,
+      );
+    } else {
+      setIncomingRequests((inboxResult.data || []) as IncomingDonorRequest[]);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
     void loadRequests();
-    return () => { mounted = false; };
-  }, []);
+  }, [user?.id]);
+
+  const respondToDonorRequest = async (item: IncomingDonorRequest, status: 'accepted' | 'declined') => {
+    if (!user) return;
+
+    setRespondingId(item.responseId);
+    setErrorMessage('');
+
+    const result = await supabase
+      .from('donor_responses')
+      .update({
+        status,
+        responded_at: new Date().toISOString(),
+      })
+      .eq('id', item.responseId)
+      .eq('donor_id', user.id);
+
+    if (result.error) {
+      setErrorMessage(
+        'Unable to ' +
+          (status === 'accepted' ? 'accept' : 'decline') +
+          ' this request: ' +
+          result.error.message,
+      );
+      setRespondingId(null);
+      return;
+    }
+
+    setIncomingRequests((current) =>
+      current.map((entry) =>
+        entry.responseId === item.responseId ? { ...entry, responseStatus: status } : entry,
+      ),
+    );
+    setRespondingId(null);
+
+    Alert.alert(
+      status === 'accepted' ? 'Donation request accepted' : 'Request declined',
+      status === 'accepted'
+        ? 'The requester can now see that you accepted. Hospital screening is still required before donation is confirmed.'
+        : 'The requester has been notified that you are unavailable.',
+    );
+  };
 
   return (
     <View style={styles.requestScreen}>
@@ -557,55 +696,149 @@ function RequestsScreen({ onHome, onProfile, onRequestDetails }: { onHome: () =>
           <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
         </Pressable>
         <Text style={styles.requestTitle}>Blood Requests</Text>
-        <View style={styles.requestHeaderIcon}>
-          <MaterialCommunityIcons name="water" size={20} color="#760009" />
-        </View>
+        <Pressable style={styles.requestHeaderIcon} onPress={() => void loadRequests()} accessibilityLabel="Refresh requests">
+          <MaterialCommunityIcons name="refresh" size={20} color="#760009" />
+        </Pressable>
       </View>
 
-      {loading ? (
-        <Text style={styles.authLoadingText}>Loading requests...</Text>
-      ) : errorMessage ? (
-        <Text style={styles.profileErrorText}>{errorMessage}</Text>
-      ) : requests.length > 0 ? (
-        requests.map((request) => (
-        <Pressable key={request.id} style={styles.mockRequestCard} onPress={() => onRequestDetails(request.id)} accessibilityLabel={`Open ${request.patientName} blood request`}>
-          <View style={styles.mockRequestTopRow}>
-            <View style={styles.mockRequestBloodBadge}><Text style={styles.mockRequestBloodText}>{request.bloodGroup}</Text></View>
-            <View style={styles.mockRequestCopy}>
-              <View style={styles.mockRequestStatusRow}>
-                {request.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
-                <Text style={styles.openStatusBadge}>{request.status.toUpperCase()}</Text>
+      <ScrollView style={styles.requestsListScroll} contentContainerStyle={styles.requestsListContent} showsVerticalScrollIndicator={false}>
+        {errorMessage ? <Text style={styles.profileErrorText}>{errorMessage}</Text> : null}
+
+        {loading ? (
+          <Text style={styles.authLoadingText}>Loading requests...</Text>
+        ) : (
+          <>
+            <Text style={styles.requestsSectionTitle}>My Blood Requests</Text>
+
+            {requests.length > 0 ? (
+              requests.map((request) => (
+                <Pressable
+                  key={request.id}
+                  style={styles.mockRequestCard}
+                  onPress={() => onRequestDetails(request.id)}
+                  accessibilityLabel={'Open ' + request.patientName + ' blood request'}
+                >
+                  <View style={styles.mockRequestTopRow}>
+                    <View style={styles.mockRequestBloodBadge}>
+                      <Text style={styles.mockRequestBloodText}>{request.bloodGroup}</Text>
+                    </View>
+                    <View style={styles.mockRequestCopy}>
+                      <View style={styles.mockRequestStatusRow}>
+                        {request.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
+                        <Text style={styles.openStatusBadge}>{request.status.toUpperCase()}</Text>
+                      </View>
+                      <Text style={styles.mockRequestPatient}>{request.patientName}</Text>
+                      <Text style={styles.findDonorMeta}>{request.unitsRequired} units required - {request.hospitalName}</Text>
+                      <Text style={styles.findDonorMeta}>{[request.area, request.city].filter(Boolean).join(', ')} - {formatRequestDeadline(request)}</Text>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={22} color="#8d706d" />
+                  </View>
+                  <Text style={styles.mockRequestHint}>Tap to view request details</Text>
+                </Pressable>
+              ))
+            ) : (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyStateIcon}>
+                  <MaterialCommunityIcons name="water" size={42} color="#760009" />
+                </View>
+                <Text style={styles.emptyStateTitle}>No Blood Requests Yet</Text>
+                <Text style={styles.emptyStateText}>Your blood requests will appear here.</Text>
               </View>
-              <Text style={styles.mockRequestPatient}>{request.patientName}</Text>
-              <Text style={styles.findDonorMeta}>{request.unitsRequired} units required - {request.hospitalName}</Text>
-              <Text style={styles.findDonorMeta}>{[request.area, request.city].filter(Boolean).join(', ')} - {formatRequestDeadline(request)}</Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={22} color="#8d706d" />
-          </View>
-          <Text style={styles.mockRequestHint}>Tap to view request details</Text>
-        </Pressable>
-        ))
-      ) : (
-        <View style={styles.emptyState}>
-          <View style={styles.emptyStateIcon}>
-            <MaterialCommunityIcons name="water" size={42} color="#760009" />
-          </View>
-          <Text style={styles.emptyStateTitle}>No Blood Requests Yet</Text>
-          <Text style={styles.emptyStateText}>Your active blood requests will appear here.</Text>
-        </View>
-      )}
+            )}
+
+            <Text style={styles.requestsSectionTitle}>Requests For You</Text>
+            <Text style={styles.requestsSectionSubtitle}>
+              Blood-help requests sent to you because your donor profile is available.
+            </Text>
+
+            {incomingRequests.length > 0 ? (
+              incomingRequests.map((item) => {
+                const isPending = item.responseStatus === 'pending';
+
+                return (
+                  <View key={item.responseId} style={styles.incomingRequestCard}>
+                    <View style={styles.mockRequestTopRow}>
+                      <View style={styles.mockRequestBloodBadge}>
+                        <Text style={styles.mockRequestBloodText}>{item.bloodGroup}</Text>
+                      </View>
+                      <View style={styles.mockRequestCopy}>
+                        <View style={styles.mockRequestStatusRow}>
+                          {item.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
+                          <Text style={styles.openStatusBadge}>{item.responseStatus.toUpperCase()}</Text>
+                        </View>
+                        <Text style={styles.mockRequestPatient}>{item.patientName}</Text>
+                        <Text style={styles.findDonorMeta}>{item.unitsRequired} units - {item.hospitalName}</Text>
+                        <Text style={styles.findDonorMeta}>{[item.area, item.city].filter(Boolean).join(', ')}</Text>
+                        <Text style={styles.findDonorMeta}>Needed: {[item.requiredDate, item.requiredTime].filter(Boolean).join(', ') || 'As soon as possible'}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.incomingPrivacyBox}>
+                      <MaterialCommunityIcons name="shield-lock-outline" size={18} color="#760009" />
+                      <Text style={styles.privacyText}>Donor home address and private contact details are not shown here.</Text>
+                    </View>
+
+                    {isPending ? (
+                      <View style={styles.incomingActions}>
+                        <Pressable
+                          style={styles.donorRequestButtonSecondary}
+                          disabled={respondingId === item.responseId}
+                          onPress={() => void respondToDonorRequest(item, 'declined')}
+                        >
+                          <Text style={styles.donorRequestButtonSecondaryText}>
+                            {respondingId === item.responseId ? 'Please wait...' : 'I’m Unable'}
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={styles.donorRequestButton}
+                          disabled={respondingId === item.responseId}
+                          onPress={() => void respondToDonorRequest(item, 'accepted')}
+                        >
+                          <Text style={styles.donorRequestText}>
+                            {respondingId === item.responseId ? 'Please wait...' : 'I Can Help'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={styles.incomingStatusBox}>
+                        <MaterialCommunityIcons
+                          name={item.responseStatus === 'accepted' ? 'check-circle' : 'close-circle'}
+                          size={18}
+                          color="#760009"
+                        />
+                        <Text style={styles.findDonorMeta}>
+                          {item.responseStatus === 'accepted'
+                            ? 'You accepted this request. Hospital screening is still required.'
+                            : 'You declined this request.'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            ) : (
+              <View style={styles.detailsInfoBox}>
+                <MaterialCommunityIcons name="account-heart-outline" size={22} color="#760009" />
+                <View style={styles.detailsInfoCopy}>
+                  <Text style={styles.detailsValue}>No donor requests yet</Text>
+                  <Text style={styles.detailsMuted}>New blood-help requests will appear here when another user requests you.</Text>
+                </View>
+              </View>
+            )}
+          </>
+        )}
+      </ScrollView>
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
-
         <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Requests">
           <MaterialCommunityIcons name="water" size={20} color="#760009" />
           <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Requests</Text>
         </Pressable>
-
         <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile">
           <MaterialCommunityIcons name="account" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Profile</Text>
@@ -3354,10 +3587,11 @@ function AppContent() {
   if (screen === 'findDonor') {
     return (
       <FindDonorScreen
-        onBack={() => setScreen('home')}
+        onBack={() => setScreen(selectedRequestId ? 'requestDetails' : 'home')}
         onHome={() => setScreen('home')}
         onRequests={() => setScreen('requests')}
         onProfile={() => setScreen('profile')}
+        requestId={selectedRequestId}
       />
     );
   }
