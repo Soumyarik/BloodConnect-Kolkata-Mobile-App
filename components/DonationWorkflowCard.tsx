@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
@@ -85,6 +85,7 @@ function stageIndex(stage: WorkflowStage) {
 
 export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [workflow, setWorkflow] = useState<WorkflowRow | null>(null);
   const [acceptedResponses, setAcceptedResponses] = useState<AcceptedResponse[]>([]);
   const [requesterId, setRequesterId] = useState<string | null>(null);
@@ -92,8 +93,8 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const refresh = async (showLoading = false) => {
-    if (!user || !requestId) return;
+  const refresh = useCallback(async (showLoading = false) => {
+    if (!userId || !requestId) return;
     if (showLoading) setLoading(true);
     setErrorMessage('');
 
@@ -129,13 +130,18 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     }
 
     if (showLoading) setLoading(false);
-  };
+  }, [requestId, userId]);
 
   useEffect(() => {
-    void refresh(true);
+    const initialLoad = setTimeout(() => {
+      void refresh(true);
+    }, 0);
     const interval = setInterval(() => void refresh(false), 5000);
-    return () => clearInterval(interval);
-  }, [requestId, user?.id]);
+    return () => {
+      clearTimeout(initialLoad);
+      clearInterval(interval);
+    };
+  }, [refresh]);
 
   const selectDonor = async (responseId: string) => {
     setBusy(true);
