@@ -19,6 +19,7 @@ import {
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase } from './utils/supabase';
+import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 
 const heroImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDNwv9RW78-JfebQWjT2TUScOmIeBnv3NQXDzTuiciY9uZbrJJkyU4Lg8ByPzzTeSg1dUxAueLjxliDQkm4u65_yKtzsQu2bgK5cGwsWwyxopzRSbuUdbD2UPIf9rs1v-HqTtXyhxJH1WjNBbdYznIrigrooMsZYL0KqfnT1vz_IoxcjQaTAPpjkpq3fJf5MWxH-5LMdheTkRypPl4e2fBRNSzam2IrIocXg206shWo16lHVyeujyPUfA';
@@ -814,6 +815,8 @@ function RequestsScreen({
                         </Text>
                       </View>
                     )}
+
+                    <DonationWorkflowCard requestId={item.requestId} />
                   </View>
                 );
               })
@@ -1072,6 +1075,8 @@ function BloodRequestDetailsScreen({
             </View>
           )}
         </View>
+
+        <DonationWorkflowCard requestId={request.id} />
 
         <Pressable style={styles.detailsPrimaryButton} onPress={onFindDonor}>
           <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
