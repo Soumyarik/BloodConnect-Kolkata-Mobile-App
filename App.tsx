@@ -620,12 +620,14 @@ function BloodRequestDetailsScreen({
   onHome,
   onRequests,
   onProfile,
+  onFindDonor,
   requestId,
 }: {
   onBack: () => void;
   onHome: () => void;
   onRequests: () => void;
   onProfile: () => void;
+  onFindDonor: () => void;
   requestId: string;
 }) {
   const [request, setRequest] = useState<BloodRequest | null>(null);
@@ -3343,6 +3345,7 @@ function AppContent() {
         onHome={() => setScreen('home')}
         onRequests={() => setScreen('requests')}
         onProfile={() => setScreen('profile')}
+        onFindDonor={() => setScreen('findDonor')}
         requestId={selectedRequestId || ''}
       />
     );
