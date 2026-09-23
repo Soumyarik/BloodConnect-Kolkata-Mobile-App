@@ -207,7 +207,7 @@ function FindDonorScreen({
 }) {
   const [selectedBlood, setSelectedBlood] = useState('O+');
   const [radius, setRadius] = useState('10 km');
-  const [acceptedDonor, setAcceptedDonor] = useState<Donor | null>(null);
+  const [requestSentDonor, setRequestSentDonor] = useState<Donor | null>(null);
   const [showEmptyState, setShowEmptyState] = useState(false);
 
   const visibleDonors = showEmptyState
@@ -217,10 +217,13 @@ function FindDonorScreen({
   const requestDonor = (donor: Donor) => {
     Alert.alert(
       `Request ${donor.name}?`,
-      `Send an in-app request for ${donor.blood} blood at AMRI Hospital, Kolkata.`,
+      `Send a blood-help request for ${donor.blood} blood at the hospital. The donor must respond before they are considered accepted.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send Request', onPress: () => setAcceptedDonor(donor) },
+        {
+          text: 'Send Request',
+          onPress: () => setRequestSentDonor(donor),
+        },
       ],
     );
   };
@@ -333,30 +336,30 @@ function FindDonorScreen({
           </View>
         </View>
 
-        {acceptedDonor ? (
+        {requestSentDonor ? (
           <View style={styles.acceptedCard}>
             <View style={styles.acceptedHeader}>
               <View style={styles.acceptedTitleRow}>
-                <MaterialCommunityIcons name="heart" size={24} color="#760009" />
-                <Text style={styles.findDonorSectionTitle}>Donor Accepted</Text>
+                <MaterialCommunityIcons name="clock-outline" size={24} color="#760009" />
+                <Text style={styles.findDonorSectionTitle}>Request Sent</Text>
               </View>
-              <Text style={styles.confirmedBadge}>Confirmed</Text>
+              <Text style={styles.confirmedBadge}>Pending</Text>
             </View>
             <Text style={styles.acceptedText}>
-              {acceptedDonor.name} has accepted your blood request and is ready to help at AMRI Hospital.
+              Your request has been sent to {requestSentDonor.name}. The donor must respond before they are considered accepted. Blood is not confirmed until the donor responds and completes the required hospital screening.
             </Text>
             <View style={styles.acceptedActions}>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Call Donor', 'Calling is available after verified contact details are shared.')}>
-                <MaterialCommunityIcons name="phone" size={20} color="#760009" />
-                <Text style={styles.acceptedActionText}>Call Donor</Text>
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Waiting for donor', 'Contact details will be available only after the donor accepts your request.')}>
+                <MaterialCommunityIcons name="phone-outline" size={20} color="#760009" />
+                <Text style={styles.acceptedActionText}>Call</Text>
               </Pressable>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('WhatsApp', 'WhatsApp contact will be enabled after donor acceptance.')}>
-                <MaterialCommunityIcons name="message-text" size={20} color="#760009" />
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Waiting for donor', 'WhatsApp contact will be available only after the donor accepts your request.')}>
+                <MaterialCommunityIcons name="message-text-outline" size={20} color="#760009" />
                 <Text style={styles.acceptedActionText}>WhatsApp</Text>
               </Pressable>
-              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Location Sharing', 'The donor can choose whether to share an exact location.')}>
-                <MaterialCommunityIcons name="navigation" size={20} color="#760009" />
-                <Text style={styles.acceptedActionText}>Navigate</Text>
+              <Pressable style={styles.acceptedAction} onPress={() => Alert.alert('Location not available', 'Live location sharing starts only after the donor accepts and explicitly chooses to share their location.')}>
+                <MaterialCommunityIcons name="map-marker-outline" size={20} color="#760009" />
+                <Text style={styles.acceptedActionText}>Track</Text>
               </Pressable>
             </View>
             <View style={styles.locationPrivacyBox}>
@@ -368,7 +371,7 @@ function FindDonorScreen({
                 <Text style={styles.pickupTitle}>Need Hospital Pickup?</Text>
                 <Text style={styles.findDonorMeta}>Verified hospitals can request cab support for donors.</Text>
               </View>
-              <Pressable style={styles.requestPickupButton} onPress={() => Alert.alert('Hospital Pickup', 'Pickup requests will be connected to verified hospitals later.')}>
+              <Pressable style={styles.requestPickupButton} onPress={() => Alert.alert('Hospital Pickup', 'Pickup support will be connected to verified hospitals later. It does not confirm donor availability.')}>
                 <Text style={styles.requestPickupText}>Request Pickup</Text>
               </Pressable>
             </View>
