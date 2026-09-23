@@ -2068,6 +2068,7 @@ function RequestBloodScreen({
   const [emergencyMode, setEmergencyMode] = useState(true);
   const [saving, setSaving] = useState(false);
   const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [currentLocationLabel, setCurrentLocationLabel] = useState('');
   const [scheduleVisible, setScheduleVisible] = useState(false);
   const [requiredDate, setRequiredDate] = useState('');
   const [requiredTime, setRequiredTime] = useState('');
@@ -2100,8 +2101,9 @@ function RequestBloodScreen({
         // Reverse geocoding is optional; the coordinates remain available.
       }
 
+      setCurrentLocationLabel(label);
       setLocation(label);
-      Alert.alert('Location added', 'The current location has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
+      Alert.alert('Location added', 'Your current area is now displayed below the location button and added to the request location field. Verify that it is the hospital location before submitting.');
     } catch (error) {
       Alert.alert('Unable to get location', error instanceof Error ? error.message : 'Please try again.');
     }
@@ -2341,6 +2343,7 @@ function RequestBloodScreen({
                     onChangeText={(value) => {
                       setLocation(value);
                       setLocationCoords(null);
+                      setCurrentLocationLabel('');
                     }}
                     placeholder="Kolkata, West Bengal"
                     placeholderTextColor="#8d706d"
@@ -2353,6 +2356,19 @@ function RequestBloodScreen({
                 <MaterialCommunityIcons name="crosshairs-gps" size={18} color="#760009" />
                 <Text style={styles.inlineActionText}>Use Current Location</Text>
               </Pressable>
+
+              {currentLocationLabel ? (
+                <View style={styles.currentLocationPreview}>
+                  <MaterialCommunityIcons name="map-marker-radius" size={18} color="#760009" />
+                  <View style={styles.currentLocationPreviewText}>
+                    <Text style={styles.currentLocationPreviewTitle}>Your current location</Text>
+                    <Text style={styles.currentLocationPreviewValue}>{currentLocationLabel}</Text>
+                    <Text style={styles.currentLocationPreviewHint}>
+                      Shown only to you. Your exact coordinates are not stored in the blood request.
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
             </View>
           </View>
 
@@ -3201,6 +3217,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
     lineHeight: 20,
+  },
+  currentLocationPreview: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#fff7f5',
+    borderWidth: 1,
+    borderColor: '#ead7d3',
+  },
+  currentLocationPreviewText: {
+    flex: 1,
+  },
+  currentLocationPreviewTitle: {
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  currentLocationPreviewValue: {
+    color: '#191c1e',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  currentLocationPreviewHint: {
+    color: '#8d706d',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
   },
   scheduleRow: {
     flexDirection: 'row',
