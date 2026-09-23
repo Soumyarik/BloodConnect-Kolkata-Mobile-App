@@ -20,6 +20,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase } from './utils/supabase';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
+import { NotificationsScreen } from './components/NotificationsScreen';
 
 const heroImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDNwv9RW78-JfebQWjT2TUScOmIeBnv3NQXDzTuiciY9uZbrJJkyU4Lg8ByPzzTeSg1dUxAueLjxliDQkm4u65_yKtzsQu2bgK5cGwsWwyxopzRSbuUdbD2UPIf9rs1v-HqTtXyhxJH1WjNBbdYznIrigrooMsZYL0KqfnT1vz_IoxcjQaTAPpjkpq3fJf5MWxH-5LMdheTkRypPl4e2fBRNSzam2IrIocXg206shWo16lHVyeujyPUfA';
@@ -31,12 +32,36 @@ function HomeScreen({
   onFindDonor,
   onRequests,
   onProfile,
+  onNotifications,
 }: {
   onRequestBlood: () => void;
   onFindDonor: () => void;
   onRequests: () => void;
   onProfile: () => void;
+  onNotifications: () => void;
 }) {
+  const { user } = useAuth();
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadUnread = async () => {
+      if (!user) return;
+      const result = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .is('read_at', null);
+      if (mounted && !result.error) setUnreadNotifications(result.count || 0);
+    };
+    void loadUnread();
+    const interval = setInterval(() => void loadUnread(), 8000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user?.id]);
+
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
@@ -49,8 +74,15 @@ function HomeScreen({
           </View>
 
           <View style={styles.headerRight}>
-            <Pressable style={styles.iconButton} accessibilityLabel="Notifications">
+            <Pressable style={styles.iconButton} onPress={onNotifications} accessibilityLabel="Notifications">
               <MaterialCommunityIcons name="bell-outline" size={22} color="#59413e" />
+              {unreadNotifications > 0 ? (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
             <View style={styles.avatar}>
               <MaterialCommunityIcons name="account" size={18} color="#ffffff" />
@@ -653,14 +685,10 @@ function RequestsScreen({
     setRespondingId(item.responseId);
     setErrorMessage('');
 
-    const result = await supabase
-      .from('donor_responses')
-      .update({
-        status,
-        responded_at: new Date().toISOString(),
-      })
-      .eq('id', item.responseId)
-      .eq('donor_id', user.id);
+    const result = await supabase.rpc('respond_to_donor_request', {
+      p_response_id: item.responseId,
+      p_status: status,
+    });
 
     if (result.error) {
       setErrorMessage(
@@ -802,18 +830,72 @@ function RequestsScreen({
                         </Pressable>
                       </View>
                     ) : (
-                      <View style={styles.incomingStatusBox}>
-                        <MaterialCommunityIcons
-                          name={item.responseStatus === 'accepted' ? 'check-circle' : 'close-circle'}
-                          size={18}
-                          color="#760009"
-                        />
-                        <Text style={styles.findDonorMeta}>
-                          {item.responseStatus === 'accepted'
-                            ? 'You accepted this request. Hospital screening is still required.'
-                            : 'You declined this request.'}
-                        </Text>
-                      </View>
+                      <>
+                        <View style={styles.incomingStatusBox}>
+                          <MaterialCommunityIcons
+                            name={
+                              item.responseStatus === 'accepted'
+                                ? 'check-circle'
+                                : item.responseStatus === 'withdrawn'
+                                  ? 'backup-restore'
+                                  : 'close-circle'
+                            }
+                            size={18}
+                            color="#760009"
+                          />
+                          <Text style={styles.findDonorMeta}>
+                            {item.responseStatus === 'accepted'
+                              ? 'You accepted this request. Hospital screening is still required.'
+                              : item.responseStatus === 'withdrawn'
+                                ? 'You withdrew your acceptance.'
+                                : 'You declined this request.'}
+                          </Text>
+                        </View>
+
+                        {item.responseStatus === 'accepted' ? (
+                          <Pressable
+                            style={styles.donorWithdrawButton}
+                            disabled={respondingId === item.responseId}
+                            onPress={() => {
+                              Alert.alert(
+                                'Withdraw acceptance?',
+                                'You will become unavailable for this response. The requester will be notified.',
+                                [
+                                  { text: 'Keep acceptance', style: 'cancel' },
+                                  {
+                                    text: 'Withdraw',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      setRespondingId(item.responseId);
+                                      setErrorMessage('');
+                                      const result = await supabase.rpc('withdraw_donor_response', {
+                                        p_response_id: item.responseId,
+                                      });
+                                      if (result.error) {
+                                        setErrorMessage('Unable to withdraw this response: ' + result.error.message);
+                                      } else {
+                                        setIncomingRequests((current) =>
+                                          current.map((entry) =>
+                                            entry.responseId === item.responseId
+                                              ? { ...entry, responseStatus: 'withdrawn' }
+                                              : entry,
+                                          ),
+                                        );
+                                      }
+                                      setRespondingId(null);
+                                    },
+                                  },
+                                ],
+                              );
+                            }}
+                          >
+                            <MaterialCommunityIcons name="backup-restore" size={17} color="#760009" />
+                            <Text style={styles.donorWithdrawText}>
+                              {respondingId === item.responseId ? 'Please wait...' : 'Withdraw Acceptance'}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </>
                     )}
 
                     <DonationWorkflowCard requestId={item.requestId} />
@@ -2113,6 +2195,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  notificationBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ba1a1a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '800',
+  },
   avatar: {
     width: 32,
     height: 32,
@@ -3295,6 +3395,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  donorWithdrawButton: {
+    marginTop: 10,
+    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#f0d8d5',
+    backgroundColor: '#fff7f5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  donorWithdrawText: {
+    color: '#760009',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
   incomingStatusBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3624,7 +3743,7 @@ const styles = StyleSheet.create({
 
 function AppContent() {
   const { session, loading, signIn, signUp, signOut } = useAuth();
-  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor'>('home');
+  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor' | 'notifications'>('home');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   if (loading) {
@@ -3646,6 +3765,22 @@ function AppContent() {
         onFindDonor={() => setScreen('findDonor')}
         onRequests={() => setScreen('requests')}
         onProfile={() => setScreen('profile')}
+        onNotifications={() => setScreen('notifications')}
+      />
+    );
+  }
+
+  if (screen === 'notifications') {
+    return (
+      <NotificationsScreen
+        onBack={() => setScreen('home')}
+        onHome={() => setScreen('home')}
+        onRequests={() => setScreen('requests')}
+        onProfile={() => setScreen('profile')}
+        onOpenRequest={(requestId) => {
+          setSelectedRequestId(requestId);
+          setScreen('requestDetails');
+        }}
       />
     );
   }
