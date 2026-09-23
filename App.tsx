@@ -638,6 +638,13 @@ function BloodRequestDetailsScreen({
     const loadRequest = async () => {
       setLoading(true);
       setErrorMessage('');
+
+      if (!requestId) {
+        setRequest(null);
+        setErrorMessage('No blood request was selected. Please go back and choose a request.');
+        setLoading(false);
+        return;
+      }
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) {
         if (mounted) { setErrorMessage(userError?.message || 'You must be signed in to view this request.'); setLoading(false); }
@@ -3277,6 +3284,7 @@ const styles = StyleSheet.create({
 function AppContent() {
   const { session, loading, signIn, signUp, signOut } = useAuth();
   const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor'>('home');
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -3313,7 +3321,16 @@ function AppContent() {
   }
 
   if (screen === 'requests') {
-    return <RequestsScreen onHome={() => setScreen('home')} onProfile={() => setScreen('profile')} onRequestDetails={() => setScreen('requestDetails')} />;
+    return (
+      <RequestsScreen
+        onHome={() => setScreen('home')}
+        onProfile={() => setScreen('profile')}
+        onRequestDetails={(requestId) => {
+          setSelectedRequestId(requestId);
+          setScreen('requestDetails');
+        }}
+      />
+    );
   }
 
   if (screen === 'requestDetails') {
@@ -3323,7 +3340,7 @@ function AppContent() {
         onHome={() => setScreen('home')}
         onRequests={() => setScreen('requests')}
         onProfile={() => setScreen('profile')}
-        request={mockBloodRequest}
+        requestId={selectedRequestId || ''}
       />
     );
   }
