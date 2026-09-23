@@ -963,6 +963,23 @@ function BloodRequestDetailsScreen({
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [donorResponses, setDonorResponses] = useState<Array<{ id: string; donorId: string; status: string; createdAt: string }>>([]);
+  const detailsScrollRef = useRef<ScrollView>(null);
+  const [donorResponsesY, setDonorResponsesY] = useState(0);
+  const [editRequestVisible, setEditRequestVisible] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editDraft, setEditDraft] = useState({
+    patientName: '',
+    bloodGroup: 'O+',
+    unitsRequired: '1',
+    hospitalName: '',
+    hospitalAddress: '',
+    city: 'Kolkata',
+    area: '',
+    requiredDate: '',
+    requiredTime: '',
+    isEmergency: true,
+    contactPhone: '',
+  });
 
   const refreshRequest = async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -1034,6 +1051,73 @@ function BloodRequestDetailsScreen({
     return () => clearInterval(interval);
   }, [requestId]);
 
+  const openEditRequest = () => {
+    if (!request) return;
+    setEditDraft({
+      patientName: request.patientName,
+      bloodGroup: request.bloodGroup,
+      unitsRequired: String(request.unitsRequired),
+      hospitalName: request.hospitalName,
+      hospitalAddress: request.hospitalAddress || [request.area, request.city].filter(Boolean).join(', '),
+      city: request.city || 'Kolkata',
+      area: request.area || '',
+      requiredDate: request.requiredDate || '',
+      requiredTime: request.requiredTime || '',
+      isEmergency: request.isEmergency,
+      contactPhone: request.contactPhone || '',
+    });
+    setEditRequestVisible(true);
+  };
+
+  const saveEditedRequest = async () => {
+    if (!request) return;
+    if (!editDraft.patientName.trim() || !editDraft.hospitalName.trim() || !editDraft.hospitalAddress.trim() || !editDraft.contactPhone.trim()) {
+      Alert.alert('Missing details', 'Patient name, hospital, address and contact number are required.');
+      return;
+    }
+
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      setErrorMessage('You must be signed in to edit this request.');
+      return;
+    }
+
+    const units = Math.max(1, Math.min(10, Number(editDraft.unitsRequired) || 1));
+    const locationParts = editDraft.hospitalAddress.split(',').map((part) => part.trim()).filter(Boolean);
+    setEditSaving(true);
+    setErrorMessage('');
+
+    const { error } = await supabase
+      .from('blood_requests')
+      .update({
+        patient_name: editDraft.patientName.trim(),
+        blood_group: editDraft.bloodGroup,
+        units_required: units,
+        hospital_name: editDraft.hospitalName.trim(),
+        hospital_address: editDraft.hospitalAddress.trim(),
+        city: editDraft.city.trim() || locationParts[0] || 'Kolkata',
+        area: editDraft.area.trim() || locationParts.slice(1).join(', ') || null,
+        required_date: editDraft.requiredDate.trim() || null,
+        required_time: editDraft.requiredTime.trim() || null,
+        is_emergency: editDraft.isEmergency,
+        contact_phone: editDraft.contactPhone.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', request.id)
+      .eq('requester_id', userData.user.id);
+
+    if (error) {
+      setErrorMessage('Unable to update request: ' + error.message);
+      setEditSaving(false);
+      return;
+    }
+
+    setEditRequestVisible(false);
+    setEditSaving(false);
+    await refreshRequest(false);
+    Alert.alert('Request updated', 'Your blood request has been updated.');
+  };
+
   const cancelRequest = async () => {
     if (!request) return;
     const { error } = await supabase.from('blood_requests').update({ status: 'cancelled' }).eq('id', request.id);
@@ -1056,13 +1140,26 @@ function BloodRequestDetailsScreen({
     <View style={styles.detailsScreen}>
       <StatusBar style="dark" />
 
-      <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={detailsScrollRef} style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
         <View style={styles.detailsHeader}>
           <Pressable style={styles.detailsIconButton} onPress={onBack} accessibilityLabel="Go back to requests">
             <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
           </Pressable>
           <Text style={styles.detailsTitle}>Blood Request Details</Text>
-          <Pressable style={styles.detailsIconButton} onPress={() => Alert.alert('More options', 'More request options will be connected later.')} accessibilityLabel="More options">
+          <Pressable
+            style={styles.detailsIconButton}
+            onPress={() =>
+              Alert.alert('Request options', 'Choose an action', [
+                { text: 'Refresh', onPress: () => void refreshRequest(false) },
+                { text: 'Find Compatible Donors', onPress: onFindDonor },
+                { text: 'Edit Request', onPress: openEditRequest },
+                request.status !== 'cancelled' && request.status !== 'fulfilled'
+                  ? { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }
+                  : { text: 'Close', style: 'cancel' },
+              ])
+            }
+            accessibilityLabel="More options"
+          >
             <MaterialCommunityIcons name="dots-vertical" size={22} color="#191c1e" />
           </Pressable>
         </View>
@@ -1106,8 +1203,19 @@ function BloodRequestDetailsScreen({
           <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="hospital" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Hospital Information</Text></View>
           <Text style={styles.detailsHospitalName}>{request.hospitalName}</Text>
           <Text style={styles.detailsMuted}><MaterialCommunityIcons name="map-marker" size={16} color="#760009" /> {[request.area, request.city].filter(Boolean).join(', ')}</Text>
-          <View style={styles.approxLocationBox}><MaterialCommunityIcons name="map-marker-radius" size={24} color="#760009" /><Text style={styles.detailsMuted}>Approximate hospital location: Dhakuria, South Kolkata</Text></View>
-          <Pressable style={styles.detailsSecondaryButton} onPress={() => Alert.alert('Hospital Location', 'A real map will be connected later.')}>
+          <View style={styles.approxLocationBox}>
+            <MaterialCommunityIcons name="map-marker-radius" size={24} color="#760009" />
+            <Text style={styles.detailsMuted}>Hospital location: {[request.area, request.city].filter(Boolean).join(', ') || 'Kolkata'}</Text>
+          </View>
+          <Pressable
+            style={styles.detailsSecondaryButton}
+            onPress={() =>
+              void Linking.openURL(
+                'https://www.google.com/maps/search/?api=1&query=' +
+                  encodeURIComponent([request.hospitalName, request.hospitalAddress, request.area, request.city].filter(Boolean).join(', ')),
+              )
+            }
+          >
             <MaterialCommunityIcons name="map-outline" size={18} color="#760009" /><Text style={styles.detailsSecondaryText}>View Hospital Location</Text>
           </Pressable>
         </View>
@@ -1137,7 +1245,7 @@ function BloodRequestDetailsScreen({
           ))}
         </View>
 
-        <View style={styles.detailsCard}>
+        <View style={styles.detailsCard} onLayout={(event) => setDonorResponsesY(event.nativeEvent.layout.y)}>
           <View style={styles.detailsSectionHeading}>
             <Text style={styles.detailsSectionTitle}>Donor Responses ({donorResponses.length})</Text>
             {donorResponses.some((item) => item.status === 'accepted') ? <Text style={styles.activeMatchBadge}>Accepted</Text> : null}
@@ -1175,15 +1283,72 @@ function BloodRequestDetailsScreen({
           <MaterialCommunityIcons name="account-search" size={22} color="#ffffff" />
           <Text style={styles.detailsPrimaryText}>Find Compatible Donors</Text>
         </Pressable>
-        <Pressable style={styles.detailsSecondaryButton} onPress={() => Alert.alert('Donor Responses', 'Donor response actions will be connected later.')}><MaterialCommunityIcons name="account-group" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text></Pressable>
+        <Pressable
+          style={styles.detailsSecondaryButton}
+          onPress={() => detailsScrollRef.current?.scrollTo({ y: Math.max(0, donorResponsesY - 20), animated: true })}
+        >
+          <MaterialCommunityIcons name="account-group" size={18} color="#191c1e" />
+          <Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text>
+        </Pressable>
         <View style={styles.detailsButtonRow}>
-          <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Edit Request', 'Request editing will be connected later.')}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
+          <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status === 'cancelled' || request.status === 'fulfilled'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
           <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Cancel Request', 'Are you sure you want to cancel this request?', [{ text: 'Keep Open', style: 'cancel' }, { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }])}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
         </View>
 
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="truck-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>Hospital Pickup Information</Text><Text style={styles.detailsMuted}>Pickup information is available only for verified hospitals or authorized partners in Kolkata.</Text></View></View>
         <View style={styles.detailsInfoBox}><MaterialCommunityIcons name="shield-check-outline" size={22} color="#760009" /><View style={styles.detailsInfoCopy}><Text style={styles.detailsValue}>BloodConnect Privacy Guarantee</Text><Text style={styles.detailsMuted}>Exact donor location and personal contact information are shared only with appropriate consent.</Text></View></View>
       </ScrollView>
+
+      <Modal visible={editRequestVisible} transparent animationType="slide" onRequestClose={() => setEditRequestVisible(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>Edit Blood Request</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 520 }}>
+              <Text style={styles.profileModalLabel}>Patient Name</Text>
+              <TextInput value={editDraft.patientName} onChangeText={(value) => setEditDraft((current) => ({ ...current, patientName: value }))} style={styles.profileModalInput} placeholder="Patient name" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Blood Group</Text>
+              <View style={styles.profileBloodGrid}>
+                {bloodGroups.map((group) => (
+                  <Pressable key={group} onPress={() => setEditDraft((current) => ({ ...current, bloodGroup: group }))} style={[styles.profileBloodChoice, editDraft.bloodGroup === group && styles.profileBloodChoiceSelected]}>
+                    <Text style={[styles.profileBloodChoiceText, editDraft.bloodGroup === group && styles.profileBloodChoiceTextSelected]}>{group}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.profileModalLabel}>Units Required</Text>
+              <TextInput value={editDraft.unitsRequired} onChangeText={(value) => setEditDraft((current) => ({ ...current, unitsRequired: value.replace(/[^0-9]/g, '') }))} keyboardType="number-pad" style={styles.profileModalInput} placeholder="1" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Hospital Name</Text>
+              <TextInput value={editDraft.hospitalName} onChangeText={(value) => setEditDraft((current) => ({ ...current, hospitalName: value }))} style={styles.profileModalInput} placeholder="Hospital name" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Hospital Address</Text>
+              <TextInput value={editDraft.hospitalAddress} onChangeText={(value) => setEditDraft((current) => ({ ...current, hospitalAddress: value }))} style={styles.profileModalInput} placeholder="Hospital address" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>City</Text>
+              <TextInput value={editDraft.city} onChangeText={(value) => setEditDraft((current) => ({ ...current, city: value }))} style={styles.profileModalInput} placeholder="Kolkata" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Area</Text>
+              <TextInput value={editDraft.area} onChangeText={(value) => setEditDraft((current) => ({ ...current, area: value }))} style={styles.profileModalInput} placeholder="Area" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Required Date (YYYY-MM-DD)</Text>
+              <TextInput value={editDraft.requiredDate} onChangeText={(value) => setEditDraft((current) => ({ ...current, requiredDate: value }))} style={styles.profileModalInput} placeholder="YYYY-MM-DD" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Required Time (HH:MM)</Text>
+              <TextInput value={editDraft.requiredTime} onChangeText={(value) => setEditDraft((current) => ({ ...current, requiredTime: value }))} style={styles.profileModalInput} placeholder="HH:MM" placeholderTextColor="#8d706d" />
+              <Text style={styles.profileModalLabel}>Contact Number</Text>
+              <TextInput value={editDraft.contactPhone} onChangeText={(value) => setEditDraft((current) => ({ ...current, contactPhone: value }))} keyboardType="phone-pad" style={styles.profileModalInput} placeholder="+91..." placeholderTextColor="#8d706d" />
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleTextWrap}>
+                  <Text style={styles.toggleTitle}>Emergency Request</Text>
+                  <Text style={styles.toggleSubtitle}>Notify compatible donors immediately.</Text>
+                </View>
+                <Switch value={editDraft.isEmergency} onValueChange={(value) => setEditDraft((current) => ({ ...current, isEmergency: value }))} trackColor={{ false: '#d9dfe4', true: '#760009' }} thumbColor="#ffffff" />
+              </View>
+            </ScrollView>
+            <View style={styles.profileModalActions}>
+              <Pressable style={styles.profileModalCancel} onPress={() => setEditRequestVisible(false)}>
+                <Text style={styles.profileModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.profileModalSave} onPress={() => void saveEditedRequest()} disabled={editSaving}>
+                <Text style={styles.profileModalSaveText}>{editSaving ? 'Saving...' : 'Save Changes'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home"><MaterialCommunityIcons name="home" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Home</Text></Pressable>
