@@ -495,3 +495,92 @@ grant execute on function public.is_request_owner(uuid) to authenticated;
 
 revoke all on function public.is_accepted_donor(uuid) from public, anon;
 grant execute on function public.is_accepted_donor(uuid) to authenticated;
+
+
+-- Do not mark the full blood request fulfilled after one donor workflow completes.
+-- Requests can require multiple units; hospital records remain authoritative.
+create or replace function public.advance_donation_workflow(
+  p_workflow_id uuid,
+  p_next_stage text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_workflow public.donation_workflows%rowtype;
+  v_request public.blood_requests%rowtype;
+  v_allowed boolean := false;
+  v_is_requester boolean := false;
+  v_is_donor boolean := false;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in.';
+  end if;
+
+  select * into v_workflow
+  from public.donation_workflows
+  where id = p_workflow_id
+  for update;
+
+  if not found then
+    raise exception 'Donation workflow not found.';
+  end if;
+
+  select * into v_request
+  from public.blood_requests
+  where id = v_workflow.request_id;
+
+  if not found then
+    raise exception 'Blood request not found.';
+  end if;
+
+  if v_request.status = 'cancelled' then
+    raise exception 'This blood request has been cancelled.';
+  end if;
+
+  if v_workflow.stage = 'completed' then
+    raise exception 'Donation workflow is already completed.';
+  end if;
+
+  v_is_requester := v_request.requester_id = auth.uid();
+  v_is_donor := v_workflow.donor_id = auth.uid();
+
+  v_allowed :=
+    (v_workflow.stage = 'accepted' and p_next_stage = 'coming_to_hospital' and v_is_donor)
+    or (v_workflow.stage = 'coming_to_hospital' and p_next_stage = 'arrived' and v_is_donor)
+    or (v_workflow.stage = 'arrived' and p_next_stage = 'screening' and v_is_requester)
+    or (v_workflow.stage = 'screening' and p_next_stage = 'eligible' and v_is_requester)
+    or (v_workflow.stage = 'eligible' and p_next_stage = 'donating' and v_is_donor)
+    or (v_workflow.stage = 'donating' and p_next_stage = 'completed' and (v_is_donor or v_is_requester));
+
+  if not v_allowed then
+    raise exception 'This workflow step is not available for your role or the current stage.';
+  end if;
+
+  update public.donation_workflows
+  set stage = p_next_stage,
+      updated_at = now(),
+      completed_at = case when p_next_stage = 'completed' then now() else completed_at end
+  where id = p_workflow_id;
+
+  insert into public.donation_workflow_events (
+    workflow_id,
+    from_stage,
+    to_stage,
+    actor_id
+  )
+  values (
+    p_workflow_id,
+    v_workflow.stage,
+    p_next_stage,
+    auth.uid()
+  );
+
+  return p_next_stage;
+end;
+$$;
+
+revoke all on function public.advance_donation_workflow(uuid, text) from public, anon;
+grant execute on function public.advance_donation_workflow(uuid, text) to authenticated;
