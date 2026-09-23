@@ -1023,7 +1023,7 @@ function BloodRequestDetailsScreen({
           <View style={styles.detailsSectionHeading}>
             <MaterialCommunityIcons name="timeline" size={22} color="#760009" />
             <Text style={styles.detailsSectionTitle}>Request Timeline</Text>
-            <Text style={styles.stepBadge}>{donorResponses.some((item) => item.status === 'accepted') ? 'Step 3 of 5' : 'Step 2 of 5'}</Text>
+            <Text style={styles.stepBadge}>Live status</Text>
           </View>
           {[
             ['check', 'Request Created', 'Your blood request is open.', true],
