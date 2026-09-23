@@ -19,3 +19,9 @@ jobs:
         run: npm install
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Expo lint
+        run: npx expo lint
+
+      - name: Expo doctor
+        run: npx expo-doctor
