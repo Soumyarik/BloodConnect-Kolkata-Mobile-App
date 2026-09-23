@@ -451,3 +451,30 @@ grant execute on function public.select_donor_for_request(uuid, uuid) to authent
 
 revoke all on function public.advance_donation_workflow(uuid, text) from public;
 grant execute on function public.advance_donation_workflow(uuid, text) to authenticated;
+
+
+-- Security hardening for workflow RPCs and helper search path
+create or replace function public.bc_compatible_donor_groups(recipient_group text)
+returns text[]
+language sql
+immutable
+set search_path = public
+as $$
+  select case upper(trim(recipient_group))
+    when 'O+' then array['O+', 'O-']
+    when 'O-' then array['O-']
+    when 'A+' then array['A+', 'A-', 'O+', 'O-']
+    when 'A-' then array['A-', 'O-']
+    when 'B+' then array['B+', 'B-', 'O+', 'O-']
+    when 'B-' then array['B-', 'O-']
+    when 'AB+' then array['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    when 'AB-' then array['A-', 'B-', 'AB-', 'O-']
+    else array[upper(trim(recipient_group))]
+  end;
+$$;
+
+revoke all on function public.select_donor_for_request(uuid, uuid) from public, anon;
+grant execute on function public.select_donor_for_request(uuid, uuid) to authenticated;
+
+revoke all on function public.advance_donation_workflow(uuid, text) from public, anon;
+grant execute on function public.advance_donation_workflow(uuid, text) to authenticated;
