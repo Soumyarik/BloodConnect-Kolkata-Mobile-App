@@ -868,59 +868,74 @@ function BloodRequestDetailsScreen({
   const [errorMessage, setErrorMessage] = useState('');
   const [donorResponses, setDonorResponses] = useState<Array<{ id: string; donorId: string; status: string; createdAt: string }>>([]);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadRequest = async () => {
-      setLoading(true);
-      setErrorMessage('');
+  const refreshRequest = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    setErrorMessage('');
 
-      if (!requestId) {
-        setRequest(null);
-        setErrorMessage('No blood request was selected. Please go back and choose a request.');
-        setLoading(false);
-        return;
-      }
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        if (mounted) { setErrorMessage(userError?.message || 'You must be signed in to view this request.'); setLoading(false); }
-        return;
-      }
-      const { data, error } = await supabase
+    if (!requestId) {
+      setRequest(null);
+      setErrorMessage('No blood request was selected. Please go back and choose a request.');
+      setLoading(false);
+      return;
+    }
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      setErrorMessage(userError?.message || 'You must be signed in to view this request.');
+      setLoading(false);
+      return;
+    }
+
+    const [{ data, error }, { data: responseData, error: responseError }] = await Promise.all([
+      supabase
         .from('blood_requests')
         .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
         .eq('id', requestId)
         .eq('requester_id', userData.user.id)
-        .maybeSingle();
-      if (!mounted) return;
-      if (error) {
-        setErrorMessage(`Unable to load request: ${error.message}`);
-        setLoading(false);
-        return;
-      }
-      if (!data) {
-        setErrorMessage('This request could not be found or is not owned by your account.');
-        setLoading(false);
-        return;
-      }
-      const mappedRequest = toBloodRequest(data as BloodRequestRow);
-      const { data: responseData, error: responseError } = await supabase
+        .maybeSingle(),
+      supabase
         .from('donor_responses')
         .select('id, donor_id, status, created_at')
         .eq('request_id', requestId)
-        .order('created_at', { ascending: true });
-      if (!mounted) return;
-      setRequest(mappedRequest);
-      if (responseError) {
-        setErrorMessage(`Request loaded, but donor responses could not be loaded: ${responseError.message}`);
-      } else {
-        setDonorResponses((responseData || []).map((row) => ({
-          id: row.id, donorId: row.donor_id, status: row.status, createdAt: row.created_at,
-        })));
-      }
+        .order('created_at', { ascending: true }),
+    ]);
+
+    if (error) {
+      setErrorMessage(`Unable to load request: ${error.message}`);
       setLoading(false);
-    };
-    void loadRequest();
-    return () => { mounted = false; };
+      return;
+    }
+
+    if (!data) {
+      setRequest(null);
+      setErrorMessage('This request could not be found or is not owned by your account.');
+      setLoading(false);
+      return;
+    }
+
+    setRequest(toBloodRequest(data as BloodRequestRow));
+
+    if (responseError) {
+      setErrorMessage(`Request loaded, but donor responses could not be loaded: ${responseError.message}`);
+    } else {
+      setDonorResponses((responseData || []).map((row) => ({
+        id: row.id,
+        donorId: row.donor_id,
+        status: row.status,
+        createdAt: row.created_at,
+      })));
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void refreshRequest(true);
+    const interval = setInterval(() => {
+      void refreshRequest(false);
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, [requestId]);
 
   const cancelRequest = async () => {
@@ -1030,6 +1045,13 @@ function BloodRequestDetailsScreen({
           <View style={styles.detailsSectionHeading}>
             <Text style={styles.detailsSectionTitle}>Donor Responses ({donorResponses.length})</Text>
             {donorResponses.some((item) => item.status === 'accepted') ? <Text style={styles.activeMatchBadge}>Accepted</Text> : null}
+            <Pressable
+              style={styles.detailsRefreshButton}
+              onPress={() => void refreshRequest(false)}
+              accessibilityLabel="Refresh donor responses"
+            >
+              <MaterialCommunityIcons name="refresh" size={18} color="#760009" />
+            </Pressable>
           </View>
           {donorResponses.length > 0 ? donorResponses.map((response, index) => (
             <View key={response.id} style={styles.donorResponseRow}>
@@ -3364,6 +3386,7 @@ const styles = StyleSheet.create({
   detailsContent: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 112, gap: 14 },
   detailsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
   detailsIconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', elevation: 1 },
+  detailsRefreshButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#f2f4f6', alignItems: 'center', justifyContent: 'center' },
   detailsTitle: { color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600' },
   detailsCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 18, shadowColor: '#991b1b', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   detailsTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
