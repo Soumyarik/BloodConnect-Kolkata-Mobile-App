@@ -1101,6 +1101,8 @@ function BloodRequestDetailsScreen({
         required_time: editDraft.requiredTime.trim() || null,
         is_emergency: editDraft.isEmergency,
         contact_phone: editDraft.contactPhone.trim(),
+        latitude: null,
+        longitude: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', request.id)
@@ -2151,8 +2153,9 @@ function RequestBloodScreen({
       hospital_address: location.trim(),
       city: locationParts[0] || location.trim(),
       area: locationParts.slice(1).join(', ') || null,
-      latitude: locationCoords?.latitude ?? null,
-      longitude: locationCoords?.longitude ?? null,
+      // Keep exact device coordinates private; the entered/derived location is used as the hospital location label.
+      latitude: null,
+      longitude: null,
       required_date: requiredDate || null,
       required_time: requiredTime || null,
       is_emergency: emergencyMode,
