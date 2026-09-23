@@ -412,3 +412,66 @@ revoke all on function public.advance_donation_workflow(uuid, text) from public,
 grant execute on function public.send_donor_request(uuid, uuid) to authenticated;
 grant execute on function public.select_donor_for_request(uuid, uuid) to authenticated;
 grant execute on function public.advance_donation_workflow(uuid, text) to authenticated;
+
+
+-- Prevent a second donor from accepting after one donor has been selected.
+create or replace function public.respond_to_donor_request(
+  p_response_id uuid,
+  p_status text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_response public.donor_responses%rowtype;
+  v_request public.blood_requests%rowtype;
+  v_donor public.profiles%rowtype;
+begin
+  if auth.uid() is null then raise exception 'You must be signed in.'; end if;
+  if p_status not in ('accepted', 'declined') then raise exception 'Invalid response status.'; end if;
+
+  select * into v_response
+  from public.donor_responses
+  where id = p_response_id and donor_id = auth.uid()
+  for update;
+
+  if not found then raise exception 'Donor request not found.'; end if;
+  if v_response.status <> 'pending' then raise exception 'This donor request has already been answered.'; end if;
+
+  select * into v_request from public.blood_requests where id = v_response.request_id;
+  if not found or v_request.status in ('cancelled', 'fulfilled') then
+    raise exception 'This blood request is no longer active.';
+  end if;
+
+  if p_status = 'accepted'
+     and exists (select 1 from public.donation_workflows where request_id = v_response.request_id) then
+    raise exception 'Another donor has already been selected for this request.';
+  end if;
+
+  select * into v_donor from public.profiles where id = auth.uid();
+
+  update public.donor_responses
+  set status = p_status, responded_at = now()
+  where id = p_response_id;
+
+  perform public.bc_create_notification(
+    v_request.requester_id,
+    case when p_status = 'accepted' then 'donor_response_accepted' else 'donor_response_declined' end,
+    case when p_status = 'accepted' then 'Donor accepted your request' else 'Donor declined your request' end,
+    case
+      when p_status = 'accepted'
+        then coalesce(v_donor.full_name, 'A donor') || ' accepted the blood-help request. You can now select an accepted donor.'
+      else coalesce(v_donor.full_name, 'A donor') || ' is unavailable for this request.'
+    end,
+    v_request.id,
+    v_response.id
+  );
+
+  return p_status;
+end;
+$$;
+
+revoke all on function public.respond_to_donor_request(uuid, text) from public, anon;
+grant execute on function public.respond_to_donor_request(uuid, text) to authenticated;
