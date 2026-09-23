@@ -1,9 +1,10 @@
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
+  Linking,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -19,6 +20,7 @@ import {
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase } from './utils/supabase';
+import * as Location from 'expo-location';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 import { NotificationsScreen } from './components/NotificationsScreen';
 
@@ -130,7 +132,7 @@ function HomeScreen({
         </View>
 
         <View style={styles.quickGrid}>
-          <Pressable style={styles.quickCard} accessibilityLabel="Donate Blood">
+          <Pressable style={styles.quickCard} onPress={onProfile} accessibilityLabel="Donate Blood">
             <View style={styles.quickIconWrap}>
               <MaterialCommunityIcons name="heart" size={20} color="#760009" />
             </View>
@@ -154,7 +156,7 @@ function HomeScreen({
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Urgent Requests</Text>
-            <Text style={styles.sectionLink}>View All</Text>
+            <Pressable onPress={onRequests} accessibilityLabel="View all urgent requests"><Text style={styles.sectionLink}>View All</Text></Pressable>
           </View>
 
           <View style={styles.requestCard}>
@@ -175,7 +177,7 @@ function HomeScreen({
               </View>
             </View>
 
-            <Pressable style={styles.secondaryButton} accessibilityLabel="Respond to urgent request">
+            <Pressable style={styles.secondaryButton} onPress={onFindDonor} accessibilityLabel="Respond to urgent request">
               <Text style={styles.secondaryButtonText}>Respond</Text>
             </Pressable>
           </View>
@@ -394,12 +396,21 @@ function FindDonorScreen({
           <Text style={styles.requestTitle}>Find Donor</Text>
         </View>
         <View style={styles.findDonorHeaderActions}>
-          <View style={styles.findDonorHeaderIcon}>
+          <Pressable
+            style={styles.findDonorHeaderIcon}
+            onPress={() =>
+              void Linking.openURL(
+                'https://www.google.com/maps/search/?api=1&query=' +
+                  encodeURIComponent('Kolkata, West Bengal'),
+              )
+            }
+            accessibilityLabel="Open Kolkata map"
+          >
             <MaterialCommunityIcons name="map-marker" size={20} color="#191c1e" />
-          </View>
-          <View style={styles.findDonorHeaderIcon}>
+          </Pressable>
+          <Pressable style={styles.findDonorHeaderIcon} onPress={onProfile} accessibilityLabel="Open profile">
             <MaterialCommunityIcons name="account" size={20} color="#191c1e" />
-          </View>
+          </Pressable>
         </View>
       </View>
 
@@ -1205,10 +1216,12 @@ const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 function ProfileScreen({
   onHome,
   onRequests,
+  onNotifications,
   onSignOut,
 }: {
   onHome: () => void;
   onRequests: () => void;
+  onNotifications: () => void;
   onSignOut: () => Promise<void>;
 }) {
   const { user, createProfile } = useAuth();
@@ -1399,8 +1412,89 @@ function ProfileScreen({
     );
   }
 
-  const showComingSoon = (title: string) => {
-    Alert.alert(title, 'Coming soon - this feature will be connected later.');
+  const openProfileSetting = async (label: string) => {
+    if (label === 'Notifications') {
+      onNotifications();
+      return;
+    }
+    if (label === 'Location Permissions') {
+      await Linking.openSettings();
+      return;
+    }
+    if (label === 'WhatsApp Preferences' || label === 'WhatsApp') {
+      const digits = profile.phone.replace(/\D/g, '');
+      if (!digits) {
+        Alert.alert('WhatsApp', 'Add your phone number in Edit Profile first.');
+        return;
+      }
+      await Linking.openURL('https://wa.me/' + (digits.startsWith('91') ? digits : '91' + digits));
+      return;
+    }
+    if (label === 'Phone Number') {
+      if (!profile.phone) {
+        Alert.alert('Phone number', 'Add your phone number in Edit Profile first.');
+        return;
+      }
+      await Linking.openURL('tel:' + profile.phone);
+      return;
+    }
+    if (label === 'Privacy' || label === 'Privacy Settings') {
+      Alert.alert(
+        'BloodConnect Privacy',
+        'Your donor home address is not shown to other users. Exact donor location and personal contact details are shared only with appropriate consent.',
+      );
+      return;
+    }
+    if (label === 'Location Sharing') {
+      Alert.alert(
+        'Location Sharing',
+        'BloodConnect shows approximate donor area before acceptance. Exact donor location is not shared publicly.',
+      );
+      return;
+    }
+    if (label === 'Help & Support') {
+      Alert.alert('Help & Support', 'Use Requests and Profile to manage blood-help activity. For account issues, contact your BloodConnect administrator.');
+      return;
+    }
+    if (label === 'About BloodConnect') {
+      Alert.alert('About BloodConnect', 'BloodConnect — Kolkata blood donation coordination app.');
+    }
+  };
+
+  const loadDonationHistory = async () => {
+    if (!user) return;
+    setProfileError('');
+    const result = await supabase
+      .from('donation_history')
+      .select('donation_date, hospital_name, blood_group, notes')
+      .eq('donor_id', user.id)
+      .order('donation_date', { ascending: false });
+
+    if (result.error) {
+      Alert.alert('Donation History', result.error.message);
+      return;
+    }
+
+    const rows = (result.data || []) as Array<{
+      donation_date: string;
+      hospital_name: string | null;
+      blood_group: string | null;
+      notes: string | null;
+    }>;
+
+    Alert.alert(
+      'Donation History',
+      rows.length
+        ? rows
+            .map(
+              (row) =>
+                [row.donation_date, row.hospital_name || 'Hospital not added', row.blood_group || profile.bloodGroup, row.notes]
+                  .filter(Boolean)
+                  .join(' • '),
+            )
+            .join('\n\n')
+        : 'No verified donation history has been added to your account yet.',
+    );
   };
 
   return (
@@ -1521,7 +1615,7 @@ function ProfileScreen({
             </View>
           </View>
           <View style={styles.profileButtonRow}>
-            <Pressable style={styles.profilePrimaryButtonSmall} onPress={() => Alert.alert('Blood Request', 'Request details will be connected later.')}>
+            <Pressable style={styles.profilePrimaryButtonSmall} onPress={onRequests}>
               <Text style={styles.profilePrimaryButtonText}>View Request</Text>
             </Pressable>
             <Pressable style={styles.profileSecondaryButton} onPress={onRequests}>
@@ -1538,7 +1632,7 @@ function ProfileScreen({
             ['map-marker', 'Location Sharing', 'Only after acceptance'],
             ['lock', 'Privacy Settings', 'Manage'],
           ].map(([icon, label, value]) => (
-            <Pressable key={label} style={styles.profileSettingRow} onPress={() => showComingSoon(label)}>
+            <Pressable key={label} style={styles.profileSettingRow} onPress={() => void openProfileSetting(label)}>
               <View style={styles.profileSettingLabel}>
                 <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#59413e" />
                 <Text style={styles.profileValueText}>{label}</Text>
@@ -1582,7 +1676,7 @@ function ProfileScreen({
               </View>
             </View>
           ))}
-          <Pressable style={styles.profileSecondaryButtonFull} onPress={() => Alert.alert('Donation History', 'Full history will be connected later.')}>
+          <Pressable style={styles.profileSecondaryButtonFull} onPress={() => void loadDonationHistory()}>
             <Text style={styles.profileSecondaryButtonText}>View Full History</Text>
           </Pressable>
         </View>
