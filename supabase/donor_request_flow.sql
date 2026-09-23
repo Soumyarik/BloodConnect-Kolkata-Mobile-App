@@ -478,3 +478,20 @@ grant execute on function public.select_donor_for_request(uuid, uuid) to authent
 
 revoke all on function public.advance_donation_workflow(uuid, text) from public, anon;
 grant execute on function public.advance_donation_workflow(uuid, text) to authenticated;
+
+
+-- Explicitly restrict SECURITY DEFINER RPCs to signed-in users.
+revoke all on function public.get_available_donors(text[], text) from public, anon;
+grant execute on function public.get_available_donors(text[], text) to authenticated;
+
+revoke all on function public.get_donor_inbox() from public, anon;
+grant execute on function public.get_donor_inbox() to authenticated;
+
+revoke all on function public.send_donor_request(uuid, uuid) from public, anon;
+grant execute on function public.send_donor_request(uuid, uuid) to authenticated;
+
+revoke all on function public.is_request_owner(uuid) from public, anon;
+grant execute on function public.is_request_owner(uuid) to authenticated;
+
+revoke all on function public.is_accepted_donor(uuid) from public, anon;
+grant execute on function public.is_accepted_donor(uuid) to authenticated;
