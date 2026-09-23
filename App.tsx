@@ -631,6 +631,7 @@ function BloodRequestDetailsScreen({
   const [request, setRequest] = useState<BloodRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [donorResponses, setDonorResponses] = useState<Array<{ id: string; donorId: string; status: string; createdAt: string }>>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -649,9 +650,31 @@ function BloodRequestDetailsScreen({
         .eq('requester_id', userData.user.id)
         .maybeSingle();
       if (!mounted) return;
-      if (error) setErrorMessage(`Unable to load request: ${error.message}`);
-      else if (!data) setErrorMessage('This request could not be found or is not owned by your account.');
-      else setRequest(toBloodRequest(data as BloodRequestRow));
+      if (error) {
+        setErrorMessage(`Unable to load request: ${error.message}`);
+        setLoading(false);
+        return;
+      }
+      if (!data) {
+        setErrorMessage('This request could not be found or is not owned by your account.');
+        setLoading(false);
+        return;
+      }
+      const mappedRequest = toBloodRequest(data as BloodRequestRow);
+      const { data: responseData, error: responseError } = await supabase
+        .from('donor_responses')
+        .select('id, donor_id, status, created_at')
+        .eq('request_id', requestId)
+        .order('created_at', { ascending: true });
+      if (!mounted) return;
+      setRequest(mappedRequest);
+      if (responseError) {
+        setErrorMessage(`Request loaded, but donor responses could not be loaded: ${responseError.message}`);
+      } else {
+        setDonorResponses((responseData || []).map((row) => ({
+          id: row.id, donorId: row.donor_id, status: row.status, createdAt: row.created_at,
+        })));
+      }
       setLoading(false);
     };
     void loadRequest();
@@ -737,34 +760,53 @@ function BloodRequestDetailsScreen({
         </View>
 
         <View style={styles.detailsCard}>
-          <View style={styles.detailsSectionHeading}><MaterialCommunityIcons name="timeline" size={22} color="#760009" /><Text style={styles.detailsSectionTitle}>Request Timeline</Text><Text style={styles.stepBadge}>Step 3 of 5</Text></View>
+          <View style={styles.detailsSectionHeading}>
+            <MaterialCommunityIcons name="timeline" size={22} color="#760009" />
+            <Text style={styles.detailsSectionTitle}>Request Timeline</Text>
+            <Text style={styles.stepBadge}>{donorResponses.some((item) => item.status === 'accepted') ? 'Step 3 of 5' : 'Step 2 of 5'}</Text>
+          </View>
           {[
-            ['check', 'Request Created', 'Today at 10:30 AM', true],
-            ['check', 'Donor Responses (3)', 'Matched with nearby Kolkata donors', true],
-            ['heart', 'Donor Accepted', 'Rahul S. confirmed immediate availability', true],
-            ['circle-outline', 'Blood Collected', 'Pending hospital delivery', false],
-            ['circle-outline', 'Request Fulfilled', 'Verification and safe transfusion completion', false],
+            ['check', 'Request Created', 'Your blood request is open.', true],
+            ['account-group', 'Donor Responses (' + donorResponses.length + ')', donorResponses.length ? 'Donor invitations and responses are shown below.' : 'No donor responses yet.', donorResponses.length > 0],
+            ['heart-outline', 'Donor Accepted', donorResponses.some((item) => item.status === 'accepted') ? 'A donor has accepted. Hospital screening is still required.' : 'Waiting for a donor to accept.', donorResponses.some((item) => item.status === 'accepted')],
+            ['circle-outline', 'Medical Screening', 'Pending hospital screening.', false],
+            ['circle-outline', 'Donation Completed', 'Pending verified donation completion.', false],
           ].map(([icon, title, subtitle, active], index) => (
             <View key={title as string} style={styles.timelineRow}>
-              <View style={[styles.timelineIcon, active ? styles.timelineIconActive : styles.timelineIconPending]}><MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={15} color={active ? '#ffffff' : '#59413e'} /></View>
-              <View style={[styles.timelineCopy, index === 2 && styles.timelineActiveCopy]}><Text style={[styles.detailsValue, index === 2 && styles.detailsAccentValue]}>{title as string}</Text><Text style={styles.detailsLabel}>{subtitle as string}</Text></View>
+              <View style={[styles.timelineIcon, active ? styles.timelineIconActive : styles.timelineIconPending]}>
+                <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={15} color={active ? '#ffffff' : '#59413e'} />
+              </View>
+              <View style={[styles.timelineCopy, active && index === 2 && styles.timelineActiveCopy]}>
+                <Text style={[styles.detailsValue, active && index === 2 && styles.detailsAccentValue]}>{title as string}</Text>
+                <Text style={styles.detailsLabel}>{subtitle as string}</Text>
+              </View>
             </View>
           ))}
         </View>
 
         <View style={styles.detailsCard}>
-          <View style={styles.detailsSectionHeading}><Text style={styles.detailsSectionTitle}>Donor Responses (3)</Text><Text style={styles.activeMatchBadge}>Active Match</Text></View>
-          {[
-            ['RS', 'Rahul S.', '2.4 km away - Available Now', 'Accepted', true],
-            ['AM', 'Ananya M.', '4.1 km away - Available Now', 'Pending', false],
-            ['AK', 'Amit K.', '5.8 km away - Unavailable', 'Declined', false],
-          ].map(([initials, name, distance, status, accepted]) => (
-            <View key={name as string} style={styles.donorResponseRow}>
-              <View style={styles.donorInitials}><Text style={styles.donorInitialsText}>{initials as string}</Text></View>
-              <View style={styles.donorResponseInfo}><View style={styles.donorNameRow}><Text style={styles.detailsValue}>{name as string}</Text><Text style={styles.responseBlood}>O+</Text></View><Text style={styles.detailsLabel}>{distance as string}</Text></View>
-              <Text style={[styles.responseStatus, accepted && styles.responseAccepted]}>{status as string}</Text>
+          <View style={styles.detailsSectionHeading}>
+            <Text style={styles.detailsSectionTitle}>Donor Responses ({donorResponses.length})</Text>
+            {donorResponses.some((item) => item.status === 'accepted') ? <Text style={styles.activeMatchBadge}>Accepted</Text> : null}
+          </View>
+          {donorResponses.length > 0 ? donorResponses.map((response, index) => (
+            <View key={response.id} style={styles.donorResponseRow}>
+              <View style={styles.donorInitials}><Text style={styles.donorInitialsText}>D{index + 1}</Text></View>
+              <View style={styles.donorResponseInfo}>
+                <Text style={styles.detailsValue}>Donor {index + 1}</Text>
+                <Text style={styles.detailsLabel}>Donor identity and exact location remain protected.</Text>
+              </View>
+              <Text style={[styles.responseStatus, response.status === 'accepted' && styles.responseAccepted]}>{response.status}</Text>
             </View>
-          ))}
+          )) : (
+            <View style={styles.detailsInfoBox}>
+              <MaterialCommunityIcons name="account-search-outline" size={22} color="#760009" />
+              <View style={styles.detailsInfoCopy}>
+                <Text style={styles.detailsValue}>No donor responses yet</Text>
+                <Text style={styles.detailsMuted}>Use Find Donor to send requests to compatible available donors.</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         <Pressable style={styles.detailsPrimaryButton} onPress={() => Alert.alert('Donate', 'Your donor response will be connected to Supabase later.')}><MaterialCommunityIcons name="hand-heart" size={22} color="#ffffff" /><Text style={styles.detailsPrimaryText}>I Can Donate</Text></Pressable>
