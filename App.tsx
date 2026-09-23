@@ -1856,7 +1856,7 @@ function ProfileScreen({
             ['help-circle-outline', 'Help & Support'],
             ['information-outline', 'About BloodConnect'],
           ].map(([icon, label]) => (
-            <Pressable key={label} style={styles.profileSettingRow} onPress={() => showComingSoon(label)}>
+            <Pressable key={label} style={styles.profileSettingRow} onPress={() => void openProfileSetting(label)}>
               <View style={styles.profileSettingLabel}>
                 <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={20} color="#59413e" />
                 <Text style={styles.profileValueText}>{label}</Text>
