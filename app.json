@@ -20,6 +20,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow BloodConnect to use your location while creating or updating a blood request."
+        }
+      ]
+    ]
   }
 }
