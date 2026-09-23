@@ -2494,7 +2494,6 @@ function RequestBloodScreen({
       </Modal>
 
       <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">      <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
