@@ -3932,6 +3932,7 @@ function AppContent() {
     <ProfileScreen
       onHome={() => setScreen('home')}
       onRequests={() => setScreen('requests')}
+      onNotifications={() => setScreen('notifications')}
       onSignOut={async () => {
         const result = await signOut();
         if (result.error) throw result.error;
