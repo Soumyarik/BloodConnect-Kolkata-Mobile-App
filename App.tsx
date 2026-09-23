@@ -1896,7 +1896,72 @@ function RequestBloodScreen({
   const [phone, setPhone] = useState('');
   const [emergencyMode, setEmergencyMode] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [locationCoords, setLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [scheduleVisible, setScheduleVisible] = useState(false);
+  const [requiredDate, setRequiredDate] = useState('');
+  const [requiredTime, setRequiredTime] = useState('');
+  const [scheduleDateDraft, setScheduleDateDraft] = useState('');
+  const [scheduleTimeDraft, setScheduleTimeDraft] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  const fillCurrentLocation = async () => {
+    setErrorMessage('');
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Location permission needed', 'Allow BloodConnect to use your location while the app is open to fill the request location.');
+      return;
+    }
+
+    try {
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = position.coords;
+      setLocationCoords({ latitude, longitude });
+
+      let label = 'Current location';
+      try {
+        const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const place = places[0];
+        const locality = [place?.district, place?.subregion, place?.city, place?.region]
+          .filter(Boolean)
+          .filter((value, index, values) => values.indexOf(value) === index);
+        label = locality.join(', ') || label;
+      } catch {
+        // Reverse geocoding is optional; the coordinates remain available.
+      }
+
+      setLocation(label);
+      Alert.alert('Location added', 'The current location has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
+    } catch (error) {
+      Alert.alert('Unable to get location', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
+
+  const openSchedule = () => {
+    setScheduleDateDraft(requiredDate);
+    setScheduleTimeDraft(requiredTime);
+    setScheduleVisible(true);
+  };
+
+  const useCurrentDateTime = () => {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    setScheduleDateDraft(now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()));
+    setScheduleTimeDraft(pad(now.getHours()) + ':' + pad(now.getMinutes()));
+  };
+
+  const saveSchedule = () => {
+    if (scheduleDateDraft && !/^\d{4}-\d{2}-\d{2}$/.test(scheduleDateDraft)) {
+      Alert.alert('Invalid date', 'Use YYYY-MM-DD.');
+      return;
+    }
+    if (scheduleTimeDraft && !/^\d{2}:\d{2}$/.test(scheduleTimeDraft)) {
+      Alert.alert('Invalid time', 'Use HH:MM.');
+      return;
+    }
+    setRequiredDate(scheduleDateDraft);
+    setRequiredTime(scheduleTimeDraft);
+    setScheduleVisible(false);
+  };
 
   const handleSubmit = async () => {
     if (!patientName.trim() || !hospitalName.trim() || !location.trim() || !phone.trim()) {
@@ -1921,10 +1986,10 @@ function RequestBloodScreen({
       hospital_address: location.trim(),
       city: locationParts[0] || location.trim(),
       area: locationParts.slice(1).join(', ') || null,
-      latitude: null,
-      longitude: null,
-      required_date: null,
-      required_time: null,
+      latitude: locationCoords?.latitude ?? null,
+      longitude: locationCoords?.longitude ?? null,
+      required_date: requiredDate || null,
+      required_time: requiredTime || null,
       is_emergency: emergencyMode,
       contact_phone: phone.trim(),
       status: 'open',
@@ -1943,6 +2008,9 @@ function RequestBloodScreen({
     setSelectedBlood('O+');
     setUnits(2);
     setEmergencyMode(true);
+    setRequiredDate('');
+    setRequiredTime('');
+    setLocationCoords(null);
     setSaving(false);
     Alert.alert('Request submitted', 'Your blood request has been saved.', [{ text: 'View Requests', onPress: onRequests }]);
   };
@@ -2098,7 +2166,10 @@ function RequestBloodScreen({
                   <MaterialCommunityIcons name="map-marker" size={18} color="#8d706d" style={styles.leftIcon} />
                   <TextInput
                     value={location}
-                    onChangeText={setLocation}
+                    onChangeText={(value) => {
+                      setLocation(value);
+                      setLocationCoords(null);
+                    }}
                     placeholder="Kolkata, West Bengal"
                     placeholderTextColor="#8d706d"
                     style={styles.formInput}
@@ -2106,7 +2177,7 @@ function RequestBloodScreen({
                 </View>
               </View>
 
-              <Pressable style={styles.inlineAction}>
+              <Pressable style={styles.inlineAction} onPress={() => void fillCurrentLocation()}>
                 <MaterialCommunityIcons name="crosshairs-gps" size={18} color="#760009" />
                 <Text style={styles.inlineActionText}>Use Current Location</Text>
               </Pressable>
@@ -2117,16 +2188,18 @@ function RequestBloodScreen({
             <Text style={styles.sectionHeading}>When is blood needed?</Text>
 
             <View style={styles.card}>
-              <View style={styles.scheduleRow}>
+              <Pressable style={styles.scheduleRow} onPress={openSchedule} accessibilityLabel="Select required date and time">
                 <View style={styles.scheduleTextWrap}>
                   <MaterialCommunityIcons name="calendar" size={18} color="#760009" />
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.scheduleTitle}>Select required date &amp; time</Text>
-                    <Text style={styles.scheduleSubtitle}>Immediate / As soon as possible</Text>
+                    <Text style={styles.scheduleSubtitle}>
+                      {requiredDate || requiredTime ? [requiredDate, requiredTime].filter(Boolean).join(' • ') : 'Immediate / As soon as possible'}
+                    </Text>
                   </View>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={22} color="#8d706d" />
-              </View>
+              </Pressable>
 
               <View style={styles.toggleRow}>
                 <View style={styles.toggleTextWrap}>
@@ -2212,7 +2285,44 @@ function RequestBloodScreen({
         </ScrollView>
       </KeyboardAvoidingView>
 
+      <Modal visible={scheduleVisible} transparent animationType="slide" onRequestClose={() => setScheduleVisible(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <View style={styles.profileModalCard}>
+            <Text style={styles.profileModalTitle}>When is blood needed?</Text>
+            <Text style={styles.profileModalLabel}>Required date (YYYY-MM-DD)</Text>
+            <TextInput
+              value={scheduleDateDraft}
+              onChangeText={setScheduleDateDraft}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Text style={styles.profileModalLabel}>Required time (HH:MM)</Text>
+            <TextInput
+              value={scheduleTimeDraft}
+              onChangeText={setScheduleTimeDraft}
+              placeholder="HH:MM"
+              placeholderTextColor="#8d706d"
+              style={styles.profileModalInput}
+            />
+            <Pressable style={styles.profileOutlineButton} onPress={useCurrentDateTime}>
+              <MaterialCommunityIcons name="clock-fast" size={18} color="#760009" />
+              <Text style={styles.profileOutlineButtonText}>Use Current Date &amp; Time</Text>
+            </Pressable>
+            <View style={styles.profileModalActions}>
+              <Pressable style={styles.profileModalCancel} onPress={() => setScheduleVisible(false)}>
+                <Text style={styles.profileModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.profileModalSave} onPress={saveSchedule}>
+                <Text style={styles.profileModalSaveText}>Save Schedule</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.bottomNav}>
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">      <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
