@@ -189,7 +189,19 @@ export function NotificationsScreen({
               onPress={() => {
                 void markAsRead(item);
                 if (item.request_id) {
-                  onOpenRequest(item.request_id);
+                  const requesterFacing =
+                    item.type === 'donor_response_accepted' ||
+                    item.type === 'donor_response_declined' ||
+                    item.type === 'donor_response_withdrawn' ||
+                    item.type === 'workflow_coming_to_hospital' ||
+                    item.type === 'workflow_arrived' ||
+                    item.type === 'workflow_donating';
+
+                  if (requesterFacing) {
+                    onOpenRequest(item.request_id);
+                  } else {
+                    onRequests();
+                  }
                 }
               }}
             >
