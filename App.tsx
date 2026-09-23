@@ -177,7 +177,7 @@ function HomeScreen({
               </View>
             </View>
 
-            <Pressable style={styles.secondaryButton} onPress={onFindDonor} accessibilityLabel="Respond to urgent request">
+            <Pressable style={styles.secondaryButton} onPress={onRequests} accessibilityLabel="Respond to urgent request">
               <Text style={styles.secondaryButtonText}>Respond</Text>
             </Pressable>
           </View>
@@ -1053,6 +1053,10 @@ function BloodRequestDetailsScreen({
 
   const openEditRequest = () => {
     if (!request) return;
+    if (request.status !== 'open') {
+      Alert.alert('Request already matched', 'This request can only be fully edited while it is still open. Manage the active donor workflow from the request details.');
+      return;
+    }
     setEditDraft({
       patientName: request.patientName,
       bloodGroup: request.bloodGroup,
@@ -1293,7 +1297,7 @@ function BloodRequestDetailsScreen({
           <Text style={styles.detailsSecondaryDarkText}>View Donor Responses</Text>
         </Pressable>
         <View style={styles.detailsButtonRow}>
-          <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status === 'cancelled' || request.status === 'fulfilled'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
+          <Pressable style={styles.detailsHalfButton} onPress={openEditRequest} disabled={request.status !== 'open'}><MaterialCommunityIcons name="pencil-outline" size={18} color="#191c1e" /><Text style={styles.detailsSecondaryDarkText}>Edit Request</Text></Pressable>
           <Pressable style={styles.detailsHalfButton} onPress={() => Alert.alert('Cancel Request', 'Are you sure you want to cancel this request?', [{ text: 'Keep Open', style: 'cancel' }, { text: 'Cancel Request', style: 'destructive', onPress: () => void cancelRequest() }])}><MaterialCommunityIcons name="close-circle-outline" size={18} color="#ba1a1a" /><Text style={styles.cancelText}>Cancel Request</Text></Pressable>
         </View>
 
