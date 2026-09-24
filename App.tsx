@@ -4,6 +4,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -98,6 +100,245 @@ const mapOpenBloodRequest = (row: OpenBloodRequestRow): OpenBloodRequest => ({
   isEmergency: row.is_emergency, status: row.status, createdAt: row.created_at,
 });
 
+const KOLKATA_BACKGROUND_IMAGES: string[] = [
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSadZs5pbo8PkScagmAakfeZLX9SQUc6qe7cFq6P7HmrisdJStiZp7ChYc&s',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ_yQOH9QfAdtc7IPz652m-6ZNzOk4j1LNeoswpUfLSMYp7CJ71OSBQBhg&s',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK-6DJozbaR-sKb0djgs6RN5d8iLalxYge-fhJ72K62w&s=10',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSiEoToNFCfXsbjIi1DTHRZWiiUqRHbYo6x7y99mdHa0A&s=10',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR_5_sF7vst7DJaFB5Qpp1vvZChpny4xD4idVsU_SX3PQ&s=10',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJaSfKLOdHU6uM4BdWqVQYn1Y6Z4UZmWxlEdHffFy3M5xmOKK3f1JeNz8&s=10',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjNydE-PsyHvwmYkPydIbrUVfgellHSw-hNdXhPOebNA&s=10',
+  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRENyNkFgGlL7tBLfTt84Co-N7m8Wh3QiwtxeEUXLG1AA&s=10',
+];
+
+const preloadCarouselImage = (url: string) => {
+  if (!url) return;
+  try {
+    if (Image.prefetch) {
+      Image.prefetch(url).catch(() => {});
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as unknown as { Image?: new () => HTMLImageElement }).Image) {
+      const img = new (window as unknown as { Image: new () => HTMLImageElement }).Image();
+      img.src = url;
+    }
+  } catch {
+    // Ignore prefetch errors
+  }
+};
+
+const getValidImagesList = (failedSet: Set<string>) =>
+  KOLKATA_BACKGROUND_IMAGES.filter((url) => !failedSet.has(url));
+
+function HomeBackgroundCarousel() {
+  const failedUrlsRef = useRef<Set<string>>(new Set());
+  const [, setFailedCount] = useState(0);
+
+  const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A');
+  const currentImageIndexRef = useRef(0);
+  const [cycleCount, setCycleCount] = useState(0);
+
+  const [slotAUri, setSlotAUri] = useState(KOLKATA_BACKGROUND_IMAGES[0]);
+  const [slotBUri, setSlotBUri] = useState(KOLKATA_BACKGROUND_IMAGES[1]);
+
+  const opacityA = useRef(new Animated.Value(1)).current;
+  const opacityB = useRef(new Animated.Value(0)).current;
+
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+  const isTransitioningRef = useRef(false);
+
+  // Preload all images on mount and cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    KOLKATA_BACKGROUND_IMAGES.forEach((url) => {
+      preloadCarouselImage(url);
+    });
+
+    return () => {
+      isMountedRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      opacityA.stopAnimation();
+      opacityB.stopAnimation();
+    };
+  }, [opacityA, opacityB]);
+
+  // Main 5-second carousel timer and cross-fade transition
+  useEffect(() => {
+    const validList = getValidImagesList(failedUrlsRef.current);
+    if (validList.length <= 1) return;
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+
+    timerRef.current = setTimeout(() => {
+      if (!isMountedRef.current || isTransitioningRef.current) return;
+
+      const currentList = getValidImagesList(failedUrlsRef.current);
+      if (currentList.length <= 1) return;
+
+      const nextIndex = (currentImageIndexRef.current + 1) % currentList.length;
+      const nextUri = currentList[nextIndex];
+      isTransitioningRef.current = true;
+
+      if (activeSlot === 'A') {
+        setSlotBUri(nextUri);
+        opacityB.setValue(0);
+
+        Animated.timing(opacityB, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
+        }).start((result) => {
+          if (!isMountedRef.current) return;
+          if (result.finished) {
+            opacityA.setValue(0);
+            setActiveSlot('B');
+            currentImageIndexRef.current = nextIndex;
+
+            const afterNextIdx = (nextIndex + 1) % currentList.length;
+            const afterNextUri = currentList[afterNextIdx];
+            setSlotAUri(afterNextUri);
+            preloadCarouselImage(currentList[(afterNextIdx + 1) % currentList.length]);
+
+            isTransitioningRef.current = false;
+            setCycleCount((c) => c + 1);
+          }
+        });
+      } else {
+        setSlotAUri(nextUri);
+        opacityA.setValue(0);
+
+        Animated.timing(opacityA, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: Platform.OS !== 'web',
+        }).start((result) => {
+          if (!isMountedRef.current) return;
+          if (result.finished) {
+            opacityB.setValue(0);
+            setActiveSlot('A');
+            currentImageIndexRef.current = nextIndex;
+
+            const afterNextIdx = (nextIndex + 1) % currentList.length;
+            const afterNextUri = currentList[afterNextIdx];
+            setSlotBUri(afterNextUri);
+            preloadCarouselImage(currentList[(afterNextIdx + 1) % currentList.length]);
+
+            isTransitioningRef.current = false;
+            setCycleCount((c) => c + 1);
+          }
+        });
+      }
+    }, 5000);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [activeSlot, cycleCount, opacityA, opacityB]);
+
+  const handleImageError = (slot: 'A' | 'B', failedUri: string) => {
+    if (!isMountedRef.current || !failedUri) return;
+    if (failedUrlsRef.current.has(failedUri)) return;
+
+    failedUrlsRef.current.add(failedUri);
+    setFailedCount((c) => c + 1);
+
+    const validList = getValidImagesList(failedUrlsRef.current);
+    if (validList.length === 0) return;
+
+    if (isTransitioningRef.current) {
+      opacityA.stopAnimation();
+      opacityB.stopAnimation();
+      isTransitioningRef.current = false;
+    }
+
+    if (slot === 'A') {
+      if (activeSlot === 'A') {
+        if (validList.length > 1) {
+          opacityA.setValue(0);
+          opacityB.setValue(1);
+          setActiveSlot('B');
+          currentImageIndexRef.current = 1 % validList.length;
+          const afterNext = (currentImageIndexRef.current + 1) % validList.length;
+          setSlotAUri(validList[afterNext]);
+          setCycleCount((c) => c + 1);
+        } else {
+          setSlotAUri(validList[0]);
+        }
+      } else {
+        const nextIdx = (currentImageIndexRef.current + 1) % validList.length;
+        setSlotAUri(validList[nextIdx]);
+      }
+    } else {
+      if (activeSlot === 'B') {
+        if (validList.length > 1) {
+          opacityB.setValue(0);
+          opacityA.setValue(1);
+          setActiveSlot('A');
+          currentImageIndexRef.current = 0;
+          const afterNext = (currentImageIndexRef.current + 1) % validList.length;
+          setSlotBUri(validList[afterNext]);
+          setCycleCount((c) => c + 1);
+        } else {
+          setSlotBUri(validList[0]);
+        }
+      } else {
+        const nextIdx = (currentImageIndexRef.current + 1) % validList.length;
+        setSlotBUri(validList[nextIdx]);
+      }
+    }
+  };
+
+  return (
+    <View style={styles.carouselContainer} pointerEvents="none">
+      {slotAUri ? (
+        <Animated.View
+          style={[
+            styles.carouselSlide,
+            {
+              opacity: opacityA,
+              zIndex: activeSlot === 'A' ? 1 : 2,
+            },
+          ]}
+        >
+          <Image
+            source={{ uri: slotAUri }}
+            resizeMode="cover"
+            style={styles.carouselImage}
+            onError={() => handleImageError('A', slotAUri)}
+          />
+        </Animated.View>
+      ) : null}
+      {slotBUri ? (
+        <Animated.View
+          style={[
+            styles.carouselSlide,
+            {
+              opacity: opacityB,
+              zIndex: activeSlot === 'B' ? 1 : 2,
+            },
+          ]}
+        >
+          <Image
+            source={{ uri: slotBUri }}
+            resizeMode="cover"
+            style={styles.carouselImage}
+            onError={() => handleImageError('B', slotBUri)}
+          />
+        </Animated.View>
+      ) : null}
+      <View style={styles.carouselOverlay} />
+    </View>
+  );
+}
+
 function HomeScreen({
   onRequestBlood,
   onFindDonor,
@@ -141,6 +382,7 @@ function HomeScreen({
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
+      <HomeBackgroundCarousel />
 
       <View style={styles.headerWrap}>
         <View style={styles.header}>
@@ -2844,6 +3086,37 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#f7f9fb',
+  },
+  carouselContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0f172a',
+    overflow: 'hidden',
+  },
+  carouselSlide: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  carouselImage: {
+    width: '100%',
+    height: '100%',
+  },
+  carouselOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    zIndex: 3,
   },
   authLoadingText: {
     color: '#59413e',
