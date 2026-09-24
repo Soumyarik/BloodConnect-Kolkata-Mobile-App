@@ -29,7 +29,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [bloodGroup, setBloodGroup] = useState('O+');
+  const [bloodGroup, setBloodGroup] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [notice, setNotice] = useState('');
@@ -160,7 +160,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 secureTextEntry
               />
 
-              <Text style={styles.label}>Blood group</Text>
+              <Text style={styles.label}>Blood group (optional; select only if known)</Text>
               <View style={styles.bloodGrid}>
                 {bloodGroups.map((group) => (
                   <Pressable

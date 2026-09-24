@@ -32,7 +32,13 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "name": "BloodConnect Kolkata",
+      "shortName": "BloodConnect",
+      "themeColor": "#760009",
+      "backgroundColor": "#f7f9fb"
     },
     "plugins": [
       [

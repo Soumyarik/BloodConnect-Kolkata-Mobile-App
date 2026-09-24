@@ -1,5 +1,4 @@
 import { Session, User } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
 
 import { supabase } from '../utils/supabase';
@@ -13,7 +12,7 @@ type SignUpInput = {
 
 type ProfileBootstrap = {
   fullName: string;
-  bloodGroup: string;
+  bloodGroup: string | null;
 };
 
 type AuthResult = {
@@ -31,8 +30,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-const pendingProfileKey = '@bloodconnect/pending-profile';
-
 async function ensureProfile(userId: string, profile: ProfileBootstrap) {
   const { data: existingProfile, error: lookupError } = await supabase
     .from('profiles')
@@ -61,7 +58,7 @@ async function initializeAuthenticatedProfile(): Promise<Error | null> {
 
   const user = userData.user;
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'BloodConnect User';
-  const bloodGroup = user.user_metadata?.blood_group || 'O+';
+  const bloodGroup = user.user_metadata?.blood_group || null;
   const profileError = await ensureProfile(user.id, { fullName, bloodGroup });
 
   if (profileError) return profileError;
@@ -97,11 +94,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (sessionSyncRef.current) return;
 
       const syncPromise = (async () => {
-        await initializeAuthenticatedProfile();
-        if (!mounted) return;
-        setSession(nextSession);
-        setUser(nextSession.user);
-        setLoading(false);
+        try {
+          const profileError = await initializeAuthenticatedProfile();
+          if (profileError) console.warn('Unable to initialize authenticated profile:', profileError.message);
+        } catch (error) {
+          console.warn('Unable to initialize authenticated profile:', error);
+        } finally {
+          if (!mounted) return;
+          setSession(nextSession);
+          setUser(nextSession.user);
+          setLoading(false);
+        }
       })();
 
       sessionSyncRef.current = syncPromise;
@@ -130,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: {
         data: {
           full_name: fullName.trim(),
-          blood_group: bloodGroup,
+          blood_group: bloodGroup || null,
         },
       },
     });
@@ -138,15 +141,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error };
     if (!data.user) return { error: new Error('Unable to create the account.') };
 
-    const profileInput = { fullName, bloodGroup };
+    const profileInput = { fullName, bloodGroup: bloodGroup || null };
 
     if (!data.session) {
-      await AsyncStorage.setItem(
-        pendingProfileKey,
-        JSON.stringify({ fullName, email, password: '', bloodGroup }),
-      );
       return {
-        error: new Error('Account created. Please verify your email, then sign in to finish setup.'),
+        error: new Error('Account created. Please verify your email, then sign in. Your profile details were saved with your account.'),
       };
     }
 
@@ -166,14 +165,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
     });
     if (error) return { error };
-
-    const pendingProfile = await AsyncStorage.getItem(pendingProfileKey);
-    if (pendingProfile && data.user) {
-      const profile = JSON.parse(pendingProfile) as ProfileBootstrap;
-      const profileError = await ensureProfile(data.user.id, profile);
-      if (profileError) return { error: profileError };
-      await AsyncStorage.removeItem(pendingProfileKey);
-    }
 
     return { error: null };
   };

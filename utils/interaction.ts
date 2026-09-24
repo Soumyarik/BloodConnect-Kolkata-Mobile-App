@@ -19,6 +19,10 @@ export async function openExternalUrl(url: string, action: string) {
 }
 
 export async function openAppSettings() {
+  if (Platform.OS === 'web') {
+    showMessage('Location permissions', 'Manage this site’s location permission in your browser’s site settings, then reload BloodConnect.');
+    return;
+  }
   try {
     await Linking.openSettings();
   } catch (error) {
