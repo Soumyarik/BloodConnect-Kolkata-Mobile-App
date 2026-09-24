@@ -1,13 +1,16 @@
+import React from 'react';
 import { registerRootComponent } from 'expo';
 
 import App from './App';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App).
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
-registerRootComponent(() => (
-  <AppErrorBoundary>
-    <App />
-  </AppErrorBoundary>
-));
+// Keep this entry file as .ts (not .tsx) by creating the wrapper with
+// React.createElement instead of JSX.
+registerRootComponent(() =>
+  React.createElement(
+    AppErrorBoundary,
+    null,
+    React.createElement(App)
+  )
+);
