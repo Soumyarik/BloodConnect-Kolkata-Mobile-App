@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import Constants from 'expo-constants';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -21,9 +22,19 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { supabase } from './utils/supabase';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 import { NotificationsScreen } from './components/NotificationsScreen';
 import { openAppSettings, openExternalUrl, showMessage } from './utils/interaction';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 const heroImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDNwv9RW78-JfebQWjT2TUScOmIeBnv3NQXDzTuiciY9uZbrJJkyU4Lg8ByPzzTeSg1dUxAueLjxliDQkm4u65_yKtzsQu2bgK5cGwsWwyxopzRSbuUdbD2UPIf9rs1v-HqTtXyhxJH1WjNBbdYznIrigrooMsZYL0KqfnT1vz_IoxcjQaTAPpjkpq3fJf5MWxH-5LMdheTkRypPl4e2fBRNSzam2IrIocXg206shWo16lHVyeujyPUfA';
@@ -2439,7 +2450,7 @@ function RequestBloodScreen({
     setSaving(true);
     setErrorMessage('');
     const locationParts = location.split(',').map((part) => part.trim()).filter(Boolean);
-    const { error } = await supabase.from('blood_requests').insert({
+    const { data: createdRequest, error } = await supabase.from('blood_requests').insert({
       requester_id: user.id,
       patient_name: patientName.trim(),
       blood_group: selectedBlood,
@@ -2456,12 +2467,20 @@ function RequestBloodScreen({
       is_emergency: emergencyMode,
       contact_phone: phone.trim(),
       status: 'open',
-    });
+    }).select('id').single();
 
     if (error) {
       setErrorMessage(`Unable to submit blood request: ${error.message}`);
       setSaving(false);
       return;
+    }
+
+    if (createdRequest?.id) {
+      void supabase.functions.invoke('send-blood-request-push', {
+        body: { requestId: createdRequest.id },
+      }).then(({ error: pushError }) => {
+        if (pushError) console.warn('Unable to send donor push alerts:', pushError.message);
+      }).catch((pushError: unknown) => console.warn('Unable to send donor push alerts:', pushError));
     }
 
     setPatientName('');
@@ -4430,6 +4449,50 @@ function AppContent() {
     setSelectedRequestId(requestId);
     setScreen('requestDetails');
   };
+
+  useEffect(() => {
+    if (!session || Platform.OS === 'web' || !Constants.isDevice) return;
+    let active = true;
+    const register = async () => {
+      try {
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId || process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+        if (!projectId) return;
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('blood-requests', {
+            name: 'Blood request alerts',
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 250, 250],
+          });
+        }
+        const permission = await Notifications.getPermissionsAsync();
+        const finalStatus = permission.status === 'granted'
+          ? permission.status
+          : (await Notifications.requestPermissionsAsync()).status;
+        if (finalStatus !== 'granted' || !active) return;
+        const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        if (!active) return;
+        await supabase.from('device_push_tokens').upsert({
+          user_id: session.user.id,
+          expo_push_token: token,
+          platform: Platform.OS,
+        }, { onConflict: 'expo_push_token' });
+      } catch (error) {
+        console.warn('Unable to register push notifications:', error);
+      }
+    };
+    void register();
+    const openFromNotification = (response: Notifications.NotificationResponse) => {
+      const requestId = response.notification.request.content.data?.requestId;
+      if (typeof requestId === 'string') openRequestDetails(requestId, 'notifications');
+    };
+    const lastResponse = Notifications.getLastNotificationResponse();
+    if (lastResponse) openFromNotification(lastResponse);
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(openFromNotification);
+    return () => {
+      active = false;
+      responseSubscription.remove();
+    };
+  }, [session?.user.id]);
 
   if (loading) {
     return (

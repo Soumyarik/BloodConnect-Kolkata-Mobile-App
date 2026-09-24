@@ -158,6 +158,14 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
       return;
     }
 
+    if (result.data) {
+      void supabase.functions.invoke('send-blood-request-push', {
+        body: { workflowId: result.data },
+      }).then(({ error: pushError }) => {
+        if (pushError) console.warn('Unable to send donor selection push update:', pushError.message);
+      }).catch((pushError: unknown) => console.warn('Unable to send donor selection push update:', pushError));
+    }
+
     await refresh(false);
     setBusy(false);
     showMessage('Donor selected', 'The selected donor is now on the post-acceptance donation workflow.');
@@ -208,6 +216,12 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
       setBusy(false);
       return;
     }
+
+    void supabase.functions.invoke('send-blood-request-push', {
+      body: { workflowId: workflow.id, stage: nextStage },
+    }).then(({ error: pushError }) => {
+      if (pushError) console.warn('Unable to send workflow push update:', pushError.message);
+    }).catch((pushError: unknown) => console.warn('Unable to send workflow push update:', pushError));
 
     await refresh(false);
     setBusy(false);
