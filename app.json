@@ -3,6 +3,12 @@
     "name": "BloodConnect-Kolkata-Mobile-App",
     "slug": "BloodConnect-Kolkata-Mobile-App",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b7d563be-3e25-4d04-9972-cf6a97f56817"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,6 +18,7 @@
     },
     "android": {
       "package": "com.apprik.bloodconnectkolkata",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

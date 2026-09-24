@@ -75,6 +75,7 @@ const mapIncomingRequest = (row: IncomingDonorRequestRow): IncomingDonorRequest 
 
 type OpenBloodRequest = {
   id: string;
+  patientName: string;
   bloodGroup: string;
   unitsRequired: number;
   hospitalName: string;
@@ -88,13 +89,13 @@ type OpenBloodRequest = {
 };
 
 type OpenBloodRequestRow = {
-  id: string; blood_group: string; units_required: number; hospital_name: string;
+  id: string; patient_name: string; blood_group: string; units_required: number; hospital_name: string;
   city: string; area: string | null; required_date: string | null; required_time: string | null;
   is_emergency: boolean; status: string; created_at: string;
 };
 
 const mapOpenBloodRequest = (row: OpenBloodRequestRow): OpenBloodRequest => ({
-  id: row.id, bloodGroup: row.blood_group, unitsRequired: row.units_required,
+  id: row.id, patientName: row.patient_name, bloodGroup: row.blood_group, unitsRequired: row.units_required,
   hospitalName: row.hospital_name, city: row.city, area: row.area || '',
   requiredDate: row.required_date, requiredTime: row.required_time,
   isEmergency: row.is_emergency, status: row.status, createdAt: row.created_at,
@@ -758,7 +759,7 @@ function RequestsScreen({
         .neq('status', 'cancelled')
         .order('created_at', { ascending: false }),
       supabase.rpc('get_donor_inbox'),
-      supabase.rpc('get_open_blood_requests_for_donor'),
+      supabase.rpc('get_open_blood_requests_with_patient_for_donor'),
     ]);
 
     if (ownResult.error) {
@@ -934,7 +935,7 @@ function RequestsScreen({
             )}
 
             <Text style={styles.requestsSectionTitle}>Open Blood Requests Near You</Text>
-            <Text style={styles.requestsSectionSubtitle}>Compatible requests in your city. Only hospital and approximate area details are shown.</Text>
+            <Text style={styles.requestsSectionSubtitle}>Compatible requests in your city. Patient names, hospital names, and approximate areas are shown.</Text>
             {openRequests.length > 0 ? openRequests.map((item) => (
               <View key={item.id} style={styles.incomingRequestCard}>
                 <View style={styles.mockRequestTopRow}>
@@ -944,7 +945,8 @@ function RequestsScreen({
                       {item.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
                       <Text style={styles.openStatusBadge}>{item.unitsRequired} {item.unitsRequired === 1 ? 'UNIT' : 'UNITS'}</Text>
                     </View>
-                    <Text style={styles.mockRequestPatient}>{item.hospitalName}</Text>
+                    <Text style={styles.mockRequestPatient}>{item.patientName || 'Patient name not provided'}</Text>
+                    <Text style={styles.findDonorMeta}>Hospital: {item.hospitalName}</Text>
                     <Text style={styles.findDonorMeta}>{[item.area, item.city].filter(Boolean).join(', ')}</Text>
                     <Text style={styles.findDonorMeta}>Needed: {[item.requiredDate, item.requiredTime].filter(Boolean).join(', ') || 'As soon as possible'}</Text>
                   </View>
@@ -1081,6 +1083,8 @@ function RequestsScreen({
                 <Text style={styles.profileValueText}>{selectedOpenRequest.unitsRequired} {selectedOpenRequest.unitsRequired === 1 ? 'unit' : 'units'} required</Text>
                 {selectedOpenRequest.isEmergency ? <Text style={styles.urgentStatusBadge}>URGENT</Text> : null}
               </View>
+              <Text style={styles.profileModalLabel}>Patient</Text>
+              <Text style={styles.profileValueText}>{selectedOpenRequest.patientName || 'Not provided'}</Text>
               <Text style={styles.profileModalLabel}>Hospital</Text>
               <Text style={styles.profileValueText}>{selectedOpenRequest.hospitalName}</Text>
               <Text style={styles.profileModalLabel}>Approximate area</Text>
