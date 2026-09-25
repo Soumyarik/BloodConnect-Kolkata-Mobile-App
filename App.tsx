@@ -789,7 +789,6 @@ function FindDonorScreen({
         throw new Error(rpcRes.error.message);
       }
 
-      const normalizedArea = (currentArea || '').toLowerCase().trim();
       const rows = (rpcRes.data || []) as Array<{
         id: string;
         full_name: string;
