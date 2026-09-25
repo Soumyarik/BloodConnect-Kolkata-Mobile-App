@@ -551,8 +551,10 @@ type Donor = {
   area: string;
   phone: string;
   available: boolean;
-  isSameArea?: boolean;
+  isNearby?: boolean;
 };
+
+const NEARBY_DISTANCE_KM = 5;
 
 const compatibleBloodGroups = (recipientGroup: string) => {
   switch (recipientGroup) {
@@ -598,7 +600,69 @@ function FindDonorScreen({
   const [sentStatusByDonor, setSentStatusByDonor] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [sendingDonorId, setSendingDonorId] = useState<string | null>(null);
+  const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Get the current device GPS position for proximity matching.
+  // Coordinates are kept in memory for the active search; when the user is an available
+  // donor, the latest coordinates are also stored on their private profile so other
+  // searches can perform server-side proximity matching without exposing exact coordinates.
+  useEffect(() => {
+    let mounted = true;
+
+    const updateGpsLocation = async () => {
+      if (!user?.id) return;
+
+      try {
+        let permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== 'granted') {
+          permission = await Location.requestForegroundPermissionsAsync();
+        }
+
+        if (permission.status !== 'granted') {
+          return;
+        }
+
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!mounted) return;
+
+        const coords = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        setGpsCoords(coords);
+
+        const profileResult = await supabase
+          .from('profiles')
+          .select('donor_available')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (!mounted) return;
+
+        if (profileResult.data?.donor_available === true) {
+          await supabase
+            .from('profiles')
+            .update({
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
+        }
+      } catch (err) {
+        console.warn('Unable to refresh GPS location for nearby donor matching:', err);
+      }
+    };
+
+    void updateGpsLocation();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id]);
 
   // Fetch logged in user's profile to default to their blood group and city
   useEffect(() => {
@@ -698,8 +762,7 @@ function FindDonorScreen({
   const loadDonors = async (
     bloodGroup: string,
     mode: 'exact' | 'compatible',
-    currentCity: string,
-    currentArea: string
+    currentCity: string
   ) => {
     setLoading(true);
     setErrorMessage('');
@@ -714,9 +777,12 @@ function FindDonorScreen({
         return;
       }
 
-      const rpcRes = await supabase.rpc('get_available_donors', {
+      const rpcRes = await supabase.rpc('get_available_donors_with_nearby', {
         p_blood_groups: bloodGroupsToQuery,
         p_city: targetCity,
+        p_user_lat: gpsCoords?.latitude ?? null,
+        p_user_lng: gpsCoords?.longitude ?? null,
+        p_nearby_km: NEARBY_DISTANCE_KM,
       });
 
       if (rpcRes.error) {
@@ -732,31 +798,23 @@ function FindDonorScreen({
         area: string;
         phone?: string | null;
         donor_available: boolean;
+        is_nearby: boolean;
       }>;
 
-      const mapped: Donor[] = rows.map((row) => {
-        const donorArea = (row.area || '').toLowerCase().trim();
-        const isSameArea = Boolean(
-          normalizedArea &&
-          donorArea &&
-          (donorArea.includes(normalizedArea) || normalizedArea.includes(donorArea))
-        );
-
-        return {
-          id: row.id,
-          name: row.full_name || 'BloodConnect Donor',
-          blood: row.blood_group,
-          city: row.city || targetCity,
-          area: row.area || '',
-          phone: row.phone || '',
-          available: row.donor_available ?? true,
-          isSameArea,
-        };
-      });
+      const mapped: Donor[] = rows.map((row) => ({
+        id: row.id,
+        name: row.full_name || 'BloodConnect Donor',
+        blood: row.blood_group,
+        city: row.city || targetCity,
+        area: row.area || '',
+        phone: row.phone || '',
+        available: row.donor_available ?? true,
+        isNearby: row.is_nearby === true,
+      }));
 
       mapped.sort((a, b) => {
-        if (a.isSameArea && !b.isSameArea) return -1;
-        if (!a.isSameArea && b.isSameArea) return 1;
+        if (a.isNearby && !b.isNearby) return -1;
+        if (!a.isNearby && b.isNearby) return 1;
         if (a.phone && !b.phone) return -1;
         if (!a.phone && b.phone) return 1;
         return a.name.localeCompare(b.name);
@@ -772,8 +830,8 @@ function FindDonorScreen({
   };
 
   useEffect(() => {
-    void loadDonors(selectedBlood, filterMode, userCity, userArea);
-  }, [selectedBlood, filterMode, userCity, userArea]);
+    void loadDonors(selectedBlood, filterMode, userCity);
+  }, [selectedBlood, filterMode, userCity, gpsCoords?.latitude, gpsCoords?.longitude]);
 
   const sendDonorRequest = async (donor: Donor) => {
     if (!requestId) return;
@@ -1090,10 +1148,10 @@ function FindDonorScreen({
                       <Text style={styles.donorMeta}>
                         📍 {[donor.area, donor.city].filter(Boolean).join(', ') || userCity || 'Kolkata'}
                       </Text>
-                      {donor.isSameArea ? (
+                      {donor.isNearby ? (
                         <View style={styles.sameAreaBadge}>
-                          <MaterialCommunityIcons name="map-marker-radius" size={13} color="#065f46" />
-                          <Text style={styles.sameAreaBadgeText}>Near You ({donor.area})</Text>
+                          <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
+                          <Text style={styles.sameAreaBadgeText}>Near You (GPS)</Text>
                         </View>
                       ) : null}
                     </View>
@@ -2716,7 +2774,7 @@ function ProfileScreen({
               </View>
             </Pressable>
           ))}
-          <Text style={styles.profilePrivacyNote}>BloodConnect does not store the device coordinates used to fill a request. The entered hospital location is shown to users who can view that request.</Text>
+          <Text style={styles.profilePrivacyNote}>BloodConnect does not expose your exact GPS coordinates to other users. When donor availability is enabled, your latest GPS position may be stored privately for nearby matching.</Text>
         </View>
 
         <View style={styles.profileCard}>
