@@ -33,17 +33,35 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 async function ensureProfile(userId: string, profile: ProfileBootstrap) {
   const { data: existingProfile, error: lookupError } = await supabase
     .from('profiles')
-    .select('id')
+    .select('id, blood_group, city, donor_available')
     .eq('id', userId)
     .maybeSingle();
 
   if (lookupError) return lookupError;
-  if (existingProfile) return null;
+  if (existingProfile) {
+    const updates: Record<string, unknown> = {};
+    if (existingProfile.donor_available === null || existingProfile.donor_available === undefined) {
+      updates.donor_available = Boolean(profile.bloodGroup || existingProfile.blood_group);
+    }
+    if (!existingProfile.city) {
+      updates.city = 'Kolkata';
+    }
+    if (!existingProfile.blood_group && profile.bloodGroup) {
+      updates.blood_group = profile.bloodGroup;
+      updates.donor_available = true;
+    }
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('profiles').update(updates).eq('id', userId);
+    }
+    return null;
+  }
 
   const { error } = await supabase.from('profiles').insert({
     id: userId,
     full_name: profile.fullName.trim(),
     blood_group: profile.bloodGroup,
+    city: 'Kolkata',
+    donor_available: Boolean(profile.bloodGroup),
   });
 
   if (error?.code === '23505') return null;
