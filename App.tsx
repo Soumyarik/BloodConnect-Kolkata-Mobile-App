@@ -4399,7 +4399,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   transitionOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 100,
     backgroundColor: '#fff8f7',
   },
@@ -6706,6 +6706,7 @@ function AppContent() {
   };
 
   useEffect(() => {
+
     if (!session || Platform.OS === 'web' || !Constants.isDevice) return;
     let active = true;
     const register = async () => {
