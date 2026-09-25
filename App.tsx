@@ -593,6 +593,7 @@ function FindDonorScreen({
   const [userArea, setUserArea] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [request, setRequest] = useState<BloodRequest | null>(null);
+  const [myDonorProfile, setMyDonorProfile] = useState<Donor | null>(null);
   const [donors, setDonors] = useState<Donor[]>([]);
   const [sentStatusByDonor, setSentStatusByDonor] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -607,7 +608,7 @@ function FindDonorScreen({
       try {
         const { data: prof } = await supabase
           .from('profiles')
-          .select('blood_group, city, area')
+          .select('full_name, blood_group, city, area, phone, donor_available, is_test_account')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -615,10 +616,24 @@ function FindDonorScreen({
         const blood = prof?.blood_group || user.user_metadata?.blood_group || 'A+';
         const city = prof?.city || 'Kolkata';
         const area = prof?.area || '';
+        const available = Boolean(prof?.donor_available) && prof?.is_test_account !== true;
 
         setUserBloodGroup(blood);
         setUserCity(city);
         setUserArea(area);
+        setMyDonorProfile(
+          prof
+            ? {
+                id: user.id,
+                name: prof.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'You',
+                blood,
+                city,
+                area,
+                phone: prof.phone || '',
+                available,
+              }
+            : null,
+        );
 
         // If not opened from an explicit request, default to the user's blood group
         if (!requestId) {
@@ -850,6 +865,19 @@ function FindDonorScreen({
     );
   });
 
+  const visibleMyDonorProfile = myDonorProfile &&
+    myDonorProfile.available &&
+    (filterMode === 'exact'
+      ? myDonorProfile.blood === selectedBlood
+      : compatibleBloodGroups(selectedBlood).includes(myDonorProfile.blood)) &&
+    (!searchQuery.trim() ||
+      myDonorProfile.name.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+      myDonorProfile.city.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+      myDonorProfile.area.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+      myDonorProfile.blood.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+
+  const visibleDonorCount = filteredDonors.length + (visibleMyDonorProfile ? 1 : 0);
+
   return (
     <View style={styles.findDonorScreen}>
       <StatusBar style="dark" />
@@ -980,7 +1008,7 @@ function FindDonorScreen({
           <View style={styles.findDonorResultsHeader}>
             <View>
               <Text style={styles.findDonorSectionTitle}>
-                {filteredDonors.length} {filterMode === 'exact' ? selectedBlood : 'Compatible'} {filteredDonors.length === 1 ? 'Donor' : 'Donors'} Found
+                {visibleDonorCount} {filterMode === 'exact' ? selectedBlood : 'Compatible'} {visibleDonorCount === 1 ? 'Donor' : 'Donors'} Found
               </Text>
               <Text style={styles.findDonorLabel}>
                 In {userCity || 'Kolkata'}{userArea ? ` • Prioritizing ${userArea}` : ''}
@@ -990,8 +1018,39 @@ function FindDonorScreen({
 
           {loading ? (
             <Text style={styles.authLoadingText}>Loading available donors...</Text>
-          ) : filteredDonors.length > 0 ? (
-            filteredDonors.map((donor) => {
+          ) : visibleDonorCount > 0 ? (
+            <>
+              {visibleMyDonorProfile ? (
+                <View style={styles.myDonorCard}>
+                  <View style={styles.myDonorHeader}>
+                    <View style={styles.donorAvatar}>
+                      <MaterialCommunityIcons name="account" size={28} color="#760009" />
+                      <View style={styles.onlineDot} />
+                    </View>
+
+                    <View style={styles.donorInfo}>
+                      <View style={styles.donorNameRow}>
+                        <Text style={styles.donorName}>{visibleMyDonorProfile.name}</Text>
+                        <Text style={styles.donorBlood}>{visibleMyDonorProfile.blood}</Text>
+                      </View>
+                      <Text style={styles.donorMeta}>
+                        📍 {[visibleMyDonorProfile.area, visibleMyDonorProfile.city].filter(Boolean).join(', ') || userCity || 'Kolkata'}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.myDonorBadge}>You</Text>
+                  </View>
+
+                  <View style={styles.myDonorNotice}>
+                    <MaterialCommunityIcons name="heart-pulse" size={18} color="#760009" />
+                    <Text style={styles.myDonorNoticeText}>
+                      Your donor profile is active and visible for this blood-group search. You cannot send a blood request to your own account.
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {filteredDonors.map((donor) => {
               const responseStatus = sentStatusByDonor[donor.id];
 
               return (
@@ -1086,7 +1145,8 @@ function FindDonorScreen({
                   ) : null}
                 </View>
               );
-            })
+              })}
+            </>
           ) : (
             <View style={styles.donorEmptyState}>
               <View style={styles.donorEmptyIcon}>
@@ -4571,6 +4631,52 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
+  },
+  myDonorCard: {
+    backgroundColor: '#fff7f5',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ffdad6',
+    shadowColor: '#991b1b',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  myDonorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  myDonorBadge: {
+    alignSelf: 'flex-start',
+    color: '#ffffff',
+    backgroundColor: '#760009',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  myDonorNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ffdad6',
+  },
+  myDonorNoticeText: {
+    flex: 1,
+    color: '#59413e',
+    fontSize: 12,
+    lineHeight: 17,
   },
   donorHeader: {
     flexDirection: 'row',
