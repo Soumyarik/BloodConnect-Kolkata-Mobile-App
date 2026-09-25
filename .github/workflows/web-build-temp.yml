@@ -1,0 +1,29 @@
+name: Temporary Web Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://vllsahxfqcsxlrbqumlt.supabase.co
+      EXPO_PUBLIC_SUPABASE_KEY: sb_publishable_RiARyODw1D1hKkIUjhEJhw_g6Hx31vy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Build web
+        run: npm run build:web
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloodconnect-web-build
+          path: web-build
+          if-no-files-found: error
+          retention-days: 1
