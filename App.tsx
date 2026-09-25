@@ -868,6 +868,10 @@ function FindDonorScreen({
   const visibleMyDonorProfile =
     myDonorProfile &&
     myDonorProfile.available &&
+    (!userCity.trim() ||
+      !myDonorProfile.city.trim() ||
+      myDonorProfile.city.toLowerCase().trim().split(',')[0].trim() ===
+        userCity.toLowerCase().trim().split(',')[0].trim()) &&
     (filterMode === 'exact'
       ? myDonorProfile.blood === selectedBlood
       : compatibleBloodGroups(selectedBlood).includes(myDonorProfile.blood)) &&
@@ -1025,6 +1029,17 @@ function FindDonorScreen({
             <>
               {visibleMyDonorProfile ? (
                 <View style={styles.myDonorCard}>
+                  <View style={styles.myDonorTopRow}>
+                    <View style={styles.myDonorLabelTag}>
+                      <MaterialCommunityIcons name="account-heart" size={16} color="#760009" />
+                      <Text style={styles.myDonorLabelText}>Your donor profile</Text>
+                    </View>
+                    <View style={styles.myDonorBadgeRow}>
+                      <Text style={styles.myDonorBadge}>You</Text>
+                      <Text style={styles.availableBadge}>Available</Text>
+                    </View>
+                  </View>
+
                   <View style={styles.myDonorHeader}>
                     <View style={styles.donorAvatar}>
                       <MaterialCommunityIcons name="account" size={28} color="#760009" />
@@ -1037,18 +1052,21 @@ function FindDonorScreen({
                         <Text style={styles.donorBlood}>{visibleMyDonorProfile.blood}</Text>
                       </View>
                       <Text style={styles.donorMeta}>
-                        📍 {[visibleMyDonorProfile.area, visibleMyDonorProfile.city].filter(Boolean).join(', ') || userCity || 'Kolkata'}
+                        📍 {[visibleMyDonorProfile.city || userCity || 'Kolkata', visibleMyDonorProfile.area].filter(Boolean).join(' / ')}
                       </Text>
                     </View>
-
-                    <Text style={styles.myDonorBadge}>You</Text>
                   </View>
 
                   <View style={styles.myDonorNotice}>
                     <MaterialCommunityIcons name="heart-pulse" size={18} color="#760009" />
-                    <Text style={styles.myDonorNoticeText}>
-                      Your donor profile is active and visible for this blood-group search. You cannot send a blood request to your own account.
-                    </Text>
+                    <View style={styles.myDonorNoticeContent}>
+                      <Text style={styles.myDonorNoticeText}>
+                        Your donor profile is active and visible for this search.
+                      </Text>
+                      <Text style={styles.myDonorNoticeSubtext}>
+                        You cannot send a blood request to your own account.
+                      </Text>
+                    </View>
                   </View>
                 </View>
               ) : null}
@@ -4648,6 +4666,30 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
+  myDonorTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ffdad6',
+  },
+  myDonorLabelTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  myDonorLabelText: {
+    color: '#760009',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  myDonorBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   myDonorHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4660,14 +4702,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#760009',
     borderRadius: 999,
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 4,
     fontSize: 10,
     lineHeight: 14,
     fontWeight: '800',
   },
   myDonorNotice: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
     backgroundColor: '#ffffff',
     borderRadius: 12,
@@ -4675,11 +4717,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ffdad6',
   },
-  myDonorNoticeText: {
+  myDonorNoticeContent: {
     flex: 1,
+  },
+  myDonorNoticeText: {
     color: '#59413e',
     fontSize: 12,
     lineHeight: 17,
+    fontWeight: '600',
+  },
+  myDonorNoticeSubtext: {
+    color: '#8d706d',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
   },
   donorHeader: {
     flexDirection: 'row',
