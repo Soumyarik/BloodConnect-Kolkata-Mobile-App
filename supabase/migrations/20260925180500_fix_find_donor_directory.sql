@@ -5,6 +5,8 @@
 alter table public.profiles
   add column if not exists is_test_account boolean not null default false;
 
+drop function if exists public.get_available_donors(text[], text);
+
 create or replace function public.get_available_donors(
   p_blood_groups text[],
   p_city text default 'Kolkata'
