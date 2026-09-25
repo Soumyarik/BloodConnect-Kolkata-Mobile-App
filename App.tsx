@@ -31,6 +31,7 @@ import { supabase } from './utils/supabase';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
+import { BloodConnectLogo } from './components/BloodConnectLogo';
 import { NotificationsScreen } from './components/NotificationsScreen';
 import { openAppSettings, openExternalUrl, showMessage } from './utils/interaction';
 
@@ -197,7 +198,7 @@ function BloodDropLoader({ compact = false }: { compact?: boolean }) {
             },
           ]}
         >
-          <MaterialCommunityIcons name="water" size={68} color="#760009" />
+          <BloodConnectLogo size={76} showWordmark={false} />
         </Animated.View>
 
         <Animated.View
