@@ -892,6 +892,16 @@ function FindDonorScreen({
   const [savingKolkataAddress, setSavingKolkataAddress] = useState(false);
   const [isRemoteKolkataResident, setIsRemoteKolkataResident] = useState(false);
   const hasPromptedOutsideRef = useRef(false);
+  const locationWatcherRef = useRef<Location.LocationSubscription | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (locationWatcherRef.current) {
+        locationWatcherRef.current.remove();
+        locationWatcherRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch logged in user's profile to default to their blood group and city
   useEffect(() => {
@@ -1169,7 +1179,7 @@ function FindDonorScreen({
       }
 
       setLocationPermissionStatus('granted');
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = position.coords;
       const coords = { latitude, longitude };
       setDeviceLocationCoords(coords);
@@ -1319,12 +1329,53 @@ function FindDonorScreen({
 
   useEffect(() => {
     let active = true;
+
+    const startLiveLocationWatcher = async () => {
+      if (Platform.OS === 'web') return;
+      try {
+        if (locationWatcherRef.current) {
+          locationWatcherRef.current.remove();
+        }
+        locationWatcherRef.current = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 12000,
+            distanceInterval: 35,
+          },
+          (loc) => {
+            if (!active) return;
+            const liveCoords = {
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+            };
+            setDeviceLocationCoords(liveCoords);
+            setGpsCoords(liveCoords);
+
+            // If user is a registered donor, sync their live position to their profile
+            if (user?.id) {
+              void supabase
+                .from('profiles')
+                .update({
+                  latitude: liveCoords.latitude,
+                  longitude: liveCoords.longitude,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', user.id);
+            }
+          }
+        );
+      } catch {
+        // Location watcher fallback
+      }
+    };
+
     const initLocation = async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status === 'granted') {
           if (active) setLocationPermissionStatus('granted');
           void detectAndSyncLocation(false);
+          void startLiveLocationWatcher();
         } else {
           // Ask user to turn on location before finding donors
           const req = await Location.requestForegroundPermissionsAsync();
@@ -1332,6 +1383,7 @@ function FindDonorScreen({
             setLocationPermissionStatus(req.status === 'granted' ? 'granted' : 'denied');
             if (req.status === 'granted') {
               void detectAndSyncLocation(false);
+              void startLiveLocationWatcher();
             }
           }
         }
@@ -1344,7 +1396,7 @@ function FindDonorScreen({
     return () => {
       active = false;
     };
-  }, [detectAndSyncLocation]);
+  }, [detectAndSyncLocation, user?.id]);
 
   useEffect(() => {
     void loadDonors(selectedBlood, filterMode, userCity, userArea, deviceLocationCoords);
@@ -1543,9 +1595,9 @@ function FindDonorScreen({
             {locationPermissionStatus === 'granted' ? (
               <View style={styles.gpsStatusRow}>
                 <View style={styles.gpsStatusBadge}>
-                  <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
+                  <View style={styles.livePulseDot} />
                   <Text style={styles.gpsStatusText}>
-                    {detectingLocation ? 'Updating GPS...' : 'Accurate GPS Active • Sorted by nearest'}
+                    {detectingLocation ? 'Updating GPS...' : 'Donor Live Location Active • Sorted by nearest'}
                   </Text>
                 </View>
                 <Pressable
@@ -1602,9 +1654,9 @@ function FindDonorScreen({
             {locationPermissionStatus === 'granted' ? (
               <View style={styles.gpsStatusRow}>
                 <View style={styles.gpsStatusBadge}>
-                  <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
+                  <View style={styles.livePulseDot} />
                   <Text style={styles.gpsStatusText}>
-                    {detectingLocation ? 'Updating GPS...' : 'Accurate GPS Active • Sorted by nearest'}
+                    {detectingLocation ? 'Updating GPS...' : 'Donor Live Location Active • Sorted by nearest'}
                   </Text>
                 </View>
                 <Pressable
@@ -1742,8 +1794,8 @@ function FindDonorScreen({
                         📍 {[visibleMyDonorProfile.city || userCity || 'Kolkata', visibleMyDonorProfile.area].filter(Boolean).join(' / ')}
                       </Text>
                       <View style={styles.nearestBadge}>
-                        <MaterialCommunityIcons name="navigation-variant" size={13} color="#065f46" />
-                        <Text style={styles.nearestBadgeText}>Your Profile (0 km)</Text>
+                        <View style={styles.livePulseDot} />
+                        <Text style={styles.nearestBadgeText}>Your Live Location (0 km)</Text>
                       </View>
                     </View>
                   </View>
@@ -1796,15 +1848,15 @@ function FindDonorScreen({
                       </Text>
                       {donor.distanceKm != null ? (
                         <View style={styles.nearestBadge}>
-                          <MaterialCommunityIcons name="navigation-variant" size={13} color="#065f46" />
+                          <View style={styles.livePulseDot} />
                           <Text style={styles.nearestBadgeText}>
-                            {donor.distanceKm < 1 ? '< 1 km away' : `${donor.distanceKm.toFixed(1)} km away`}
+                            Live GPS • {donor.distanceKm < 1 ? '< 1 km away' : `${donor.distanceKm.toFixed(1)} km away`}
                           </Text>
                         </View>
                       ) : donor.isNearby ? (
                         <View style={styles.sameAreaBadge}>
-                          <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
-                          <Text style={styles.sameAreaBadgeText}>Near You (GPS)</Text>
+                          <View style={styles.livePulseDot} />
+                          <Text style={styles.sameAreaBadgeText}>Live GPS • Near You</Text>
                         </View>
                       ) : donor.isSameArea ? (
                         <View style={styles.sameAreaBadge}>
@@ -3193,6 +3245,8 @@ type ProfileData = {
   city: string;
   area: string;
   donorAvailable: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 type EmergencyContact = {
@@ -3254,7 +3308,7 @@ function ProfileScreen({
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, emergency_contact_name, emergency_contact_phone')
+      .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, latitude, longitude, emergency_contact_name, emergency_contact_phone')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -3306,6 +3360,8 @@ function ProfileScreen({
       city: data.city || '',
       area: data.area || '',
       donorAvailable: data.donor_available ?? false,
+      latitude: data.latitude,
+      longitude: data.longitude,
     };
     setProfile(nextProfile);
     setDraftProfile(nextProfile);
@@ -3329,7 +3385,7 @@ function ProfileScreen({
     if (user) void loadProfile();
   }, [user]);
 
-  const updateProfileRow = async (updates: Record<string, string | boolean | null>) => {
+  const updateProfileRow = async (updates: Record<string, string | number | boolean | null | undefined>) => {
     if (!user) {
       throw new Error('Your authenticated user could not be found.');
     }
@@ -3399,6 +3455,72 @@ function ProfileScreen({
     }
   };
 
+  const [updatingLiveLocation, setUpdatingLiveLocation] = useState(false);
+
+  const refreshDonorLiveLocation = async () => {
+    if (!profile) return;
+    setUpdatingLiveLocation(true);
+    try {
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        permission = await Location.requestForegroundPermissionsAsync();
+      }
+      if (permission.status !== 'granted') {
+        showMessage('Location permission needed', 'Allow location permission to update your live donor GPS location.');
+        setUpdatingLiveLocation(false);
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const liveCoords = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+
+      let detectedCity = profile.city || 'Kolkata';
+      let detectedArea = profile.area || '';
+      if (Platform.OS !== 'web') {
+        try {
+          const places = await Location.reverseGeocodeAsync(liveCoords);
+          const place = places[0];
+          if (place) {
+            detectedCity = place.city || place.subregion || place.district || detectedCity;
+            detectedArea = place.district || place.subregion || place.name || detectedArea;
+          }
+        } catch {
+          // Reverse geocode fallback
+        }
+      }
+
+      await updateProfileRow({
+        latitude: liveCoords.latitude,
+        longitude: liveCoords.longitude,
+        city: detectedCity,
+        area: detectedArea,
+        updated_at: new Date().toISOString(),
+      });
+
+      const updatedProf: ProfileData = {
+        ...profile,
+        city: detectedCity,
+        area: detectedArea,
+        latitude: liveCoords.latitude,
+        longitude: liveCoords.longitude,
+      };
+      setProfile(updatedProf);
+      setDraftProfile(updatedProf);
+
+      showMessage(
+        'Live GPS Updated',
+        `Your live device location has been updated: ${detectedArea ? detectedArea + ', ' : ''}${detectedCity}.`
+      );
+    } catch (err) {
+      showMessage('Location Error', err instanceof Error ? err.message : 'Unable to acquire live location.');
+    } finally {
+      setUpdatingLiveLocation(false);
+    }
+  };
+
   const updateAvailability = async (nextValue: boolean) => {
     if (!profile) return;
     if (nextValue && (!profile.bloodGroup || !profile.city)) {
@@ -3408,8 +3530,61 @@ function ProfileScreen({
     setAvailableToDonate(nextValue);
     setProfileError('');
     try {
-      await updateProfileRow({ donor_available: nextValue });
-      setProfile({ ...profile, donorAvailable: nextValue });
+      let liveCoords: { latitude: number; longitude: number } | null = null;
+      let detectedCity = profile.city;
+      let detectedArea = profile.area;
+
+      if (nextValue) {
+        // Automatically acquire live GPS position on marking available
+        try {
+          let permission = await Location.getForegroundPermissionsAsync();
+          if (permission.status !== 'granted') {
+            permission = await Location.requestForegroundPermissionsAsync();
+          }
+          if (permission.status === 'granted') {
+            const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            liveCoords = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            };
+            if (Platform.OS !== 'web') {
+              try {
+                const places = await Location.reverseGeocodeAsync(liveCoords);
+                const place = places[0];
+                if (place) {
+                  detectedCity = place.city || place.subregion || place.district || detectedCity;
+                  detectedArea = place.district || place.subregion || place.name || detectedArea;
+                }
+              } catch {}
+            }
+          }
+        } catch (locErr) {
+          console.warn('Unable to get live location for donor availability:', locErr);
+        }
+      }
+
+      await updateProfileRow({
+        donor_available: nextValue,
+        ...(liveCoords ? { latitude: liveCoords.latitude, longitude: liveCoords.longitude, city: detectedCity, area: detectedArea } : {}),
+        updated_at: new Date().toISOString(),
+      });
+
+      const updatedProf: ProfileData = {
+        ...profile,
+        donorAvailable: nextValue,
+        city: detectedCity,
+        area: detectedArea,
+        ...(liveCoords ? { latitude: liveCoords.latitude, longitude: liveCoords.longitude } : {}),
+      };
+      setProfile(updatedProf);
+      setDraftProfile(updatedProf);
+
+      if (nextValue) {
+        showMessage(
+          'Live Donor Location Active',
+          `Your live device location (${detectedArea ? detectedArea + ', ' : ''}${detectedCity}) is active. Recipients nearby can now locate and request your help.`
+        );
+      }
     } catch (error) {
       setAvailableToDonate(profile.donorAvailable);
       setProfileError(`Unable to update availability: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -3571,6 +3746,29 @@ function ProfileScreen({
             />
           </View>
           <Text style={styles.profileFinePrint}>You can change your availability anytime.</Text>
+          {availableToDonate ? (
+            <View style={styles.profileLiveLocationBox}>
+              <View style={styles.profileLiveLocationHeader}>
+                <View style={styles.livePulseDot} />
+                <Text style={styles.profileLiveLocationTitle}>Live Device Location Active</Text>
+              </View>
+              <Text style={styles.profileLiveLocationDesc}>
+                📍 {[profile.area, profile.city].filter(Boolean).join(', ') || 'Current Device GPS'}
+                {profile.latitude && profile.longitude ? ` (${profile.latitude.toFixed(4)}, ${profile.longitude.toFixed(4)})` : ''}
+              </Text>
+              <Pressable
+                style={styles.profileRefreshLocationBtn}
+                onPress={refreshDonorLiveLocation}
+                disabled={updatingLiveLocation}
+                accessibilityLabel="Refresh live donor location"
+              >
+                <MaterialCommunityIcons name="crosshairs-gps" size={15} color="#760009" />
+                <Text style={styles.profileRefreshLocationText}>
+                  {updatingLiveLocation ? 'Locating...' : 'Update Live GPS Location'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.profileCard}>
@@ -5942,6 +6140,12 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     fontWeight: '700',
   },
+  livePulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#059669',
+  },
   locationRefreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -6387,6 +6591,52 @@ const styles = StyleSheet.create({
   profileHeadingCopy: { flex: 1 },
   profileSectionTitle: { color: '#191c1e', fontSize: 20, lineHeight: 28, fontWeight: '600', marginBottom: 4 },
   profileFinePrint: { color: '#59413e', fontSize: 12, lineHeight: 16, opacity: 0.8 },
+  profileLiveLocationBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    gap: 8,
+  },
+  profileLiveLocationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  profileLiveLocationTitle: {
+    color: '#065f46',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  profileLiveLocationDesc: {
+    color: '#047857',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  profileRefreshLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#760009',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+    marginTop: 2,
+  },
+  profileRefreshLocationText: {
+    color: '#760009',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
   profileInfoRows: { gap: 4, marginVertical: 10 },
   profileInfoRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   profileAccentText: { color: '#760009', fontSize: 13, lineHeight: 19, fontWeight: '700' },
@@ -6750,6 +7000,45 @@ function AppContent() {
       responseSubscription.remove();
     };
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let active = true;
+
+    const syncLiveDonorLocationOnLaunch = async () => {
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('donor_available')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (!active || !profile?.donor_available) return;
+
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted' || !active) return;
+
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        if (!active) return;
+
+        await supabase
+          .from('profiles')
+          .update({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', session.user.id);
+      } catch {
+        // App launch sync silent fallback
+      }
+    };
+
+    void syncLiveDonorLocationOnLaunch();
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id]);
 
   if (loading) {
     return <BloodDropLoader />;
