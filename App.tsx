@@ -568,42 +568,6 @@ const compatibleBloodGroups = (recipientGroup: string) => {
   }
 };
 
-const ALL_BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-
-const ensureDonorSearchHelper = async (userId: string, city: string) => {
-  try {
-    const cityName = (city || 'Kolkata').trim();
-    const { data: existing } = await supabase
-      .from('blood_requests')
-      .select('id, city')
-      .eq('requester_id', userId)
-      .eq('status', 'open')
-      .eq('blood_group', 'AB+')
-      .limit(1)
-      .maybeSingle();
-
-    if (!existing) {
-      await supabase.from('blood_requests').insert({
-        requester_id: userId,
-        patient_name: 'Donor Directory Seeker',
-        blood_group: 'AB+',
-        units_required: 1,
-        hospital_name: 'Nearby Donors Directory',
-        city: cityName,
-        contact_phone: '9999999999',
-        status: 'open',
-      });
-    } else if (existing.city !== cityName) {
-      await supabase
-        .from('blood_requests')
-        .update({ city: cityName })
-        .eq('id', existing.id);
-    }
-  } catch (err) {
-    console.warn('ensureDonorSearchHelper error:', err);
-  }
-};
-
 function FindDonorScreen({
   onBack,
   onHome,
@@ -725,14 +689,27 @@ function FindDonorScreen({
     setLoading(true);
     setErrorMessage('');
 
-    const targetCity = (currentCity || 'Kolkata').trim();
+    const targetCity = (currentCity || '').trim();
+    const bloodGroupsToQuery = mode === 'exact' ? [bloodGroup] : compatibleBloodGroups(bloodGroup);
 
     try {
-      if (user?.id) {
-        await ensureDonorSearchHelper(user.id, targetCity);
+      if (!targetCity) {
+        setDonors([]);
+        setErrorMessage('Add your city in Profile to find donors near you.');
+        return;
       }
 
-      let rows: Array<{
+      const rpcRes = await supabase.rpc('get_available_donors', {
+        p_blood_groups: bloodGroupsToQuery,
+        p_city: targetCity,
+      });
+
+      if (rpcRes.error) {
+        throw new Error(rpcRes.error.message);
+      }
+
+      const normalizedArea = (currentArea || '').toLowerCase().trim();
+      const rows = (rpcRes.data || []) as Array<{
         id: string;
         full_name: string;
         blood_group: string;
@@ -740,71 +717,7 @@ function FindDonorScreen({
         area: string;
         phone?: string | null;
         donor_available: boolean;
-      }> = [];
-
-      // 1. Direct profiles query if accessible
-      try {
-        let profileQuery = supabase
-          .from('profiles')
-          .select('id, full_name, blood_group, city, area, phone, donor_available')
-          .eq('donor_available', true);
-
-        if (user?.id) {
-          profileQuery = profileQuery.neq('id', user.id);
-        }
-
-        const profileRes = await profileQuery;
-        if (!profileRes.error && profileRes.data && profileRes.data.length > 0) {
-          rows = profileRes.data;
-        }
-      } catch {
-        // RLS may restrict profiles query
-      }
-
-      // 2. Query RPC get_available_donors
-      // Always pass ALL_BLOOD_GROUPS to the RPC so that the Postgres check
-      // `p_blood_groups = public.bc_compatible_donor_groups(br.blood_group)`
-      // succeeds against the open AB+ helper request, returning all available donors in the city.
-      const rpcRes = await supabase.rpc('get_available_donors', {
-        p_blood_groups: ALL_BLOOD_GROUPS,
-        p_city: targetCity,
-      });
-
-      if (rpcRes.data && rpcRes.data.length > 0) {
-        // Merge rows by ID to avoid duplicates and preserve any phone data
-        const rowMap = new Map<string, (typeof rows)[0]>();
-        rows.forEach((r) => rowMap.set(r.id, r));
-        (rpcRes.data as typeof rows).forEach((r) => {
-          if (!rowMap.has(r.id)) {
-            rowMap.set(r.id, r);
-          } else {
-            const existing = rowMap.get(r.id)!;
-            rowMap.set(r.id, {
-              ...existing,
-              ...r,
-              phone: existing.phone || (r as { phone?: string | null }).phone || null,
-            });
-          }
-        });
-        rows = Array.from(rowMap.values());
-      } else if (rpcRes.error) {
-        console.warn('RPC donor query notice:', rpcRes.error.message);
-      }
-
-      // Exclude logged in user
-      if (user?.id) {
-        rows = rows.filter((r) => r.id !== user.id);
-      }
-
-      // Filter rows in JS according to selected blood group & filter mode:
-      if (mode === 'exact') {
-        rows = rows.filter((r) => r.blood_group === bloodGroup);
-      } else {
-        const compatible = compatibleBloodGroups(bloodGroup);
-        rows = rows.filter((r) => compatible.includes(r.blood_group));
-      }
-
-      const normalizedArea = (currentArea || '').toLowerCase().trim();
+      }>;
 
       const mapped: Donor[] = rows.map((row) => {
         const donorArea = (row.area || '').toLowerCase().trim();
@@ -818,15 +731,14 @@ function FindDonorScreen({
           id: row.id,
           name: row.full_name || 'BloodConnect Donor',
           blood: row.blood_group,
-          city: row.city || currentCity || 'Kolkata',
+          city: row.city || targetCity,
           area: row.area || '',
-          phone: (row as { phone?: string | null }).phone || '',
+          phone: row.phone || '',
           available: row.donor_available ?? true,
           isSameArea,
         };
       });
 
-      // Prioritize same area, then with phone, then name
       mapped.sort((a, b) => {
         if (a.isSameArea && !b.isSameArea) return -1;
         if (!a.isSameArea && b.isSameArea) return 1;
