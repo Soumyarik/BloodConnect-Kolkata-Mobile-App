@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { BloodConnectLogo } from './BloodConnectLogo';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -85,9 +86,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.brandMark}>
-          <MaterialCommunityIcons name="water" size={34} color="#ffffff" />
-        </View>
+        <BloodConnectLogo size={128} />
         <Text style={styles.title}>BloodConnect</Text>
         <Text style={styles.subtitle}>Helping Kolkata connect, one drop at a time.</Text>
 
