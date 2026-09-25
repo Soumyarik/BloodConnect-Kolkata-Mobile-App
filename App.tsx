@@ -1,10 +1,12 @@
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Easing,
   Image,
   ImageSourcePropType,
@@ -255,13 +257,29 @@ function KolkataHeroBanner() {
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
 
-    timerRef.current = setTimeout(() => {
-      if (!isMountedRef.current || isTransitioningRef.current) return;
-      const next = (currentIndexRef.current + 1) % KOLKATA_HERO_SLIDES.length;
-      goToSlide(next);
-    }, 5500);
+    const scheduleNext = () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        if (!isMountedRef.current || isTransitioningRef.current) return;
+        if (AppState.currentState !== 'active') return;
+        const next = (currentIndexRef.current + 1) % KOLKATA_HERO_SLIDES.length;
+        goToSlide(next);
+      }, 5500);
+    };
+
+    scheduleNext();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        scheduleNext();
+      } else if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    });
 
     return () => {
+      appStateSub.remove();
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -391,22 +409,63 @@ function HomeScreen({
     let mounted = true;
     const loadUnread = async () => {
       if (!user) return;
-      const [result, inbox] = await Promise.all([supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .is('read_at', null), supabase.rpc('get_donor_inbox')]);
+      const [result, inbox] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .is('read_at', null),
+        supabase.rpc('get_donor_inbox'),
+      ]);
       if (mounted && !result.error) setUnreadNotifications(result.count || 0);
       if (mounted && !inbox.error) {
-        const pending = ((inbox.data || []) as IncomingDonorRequestRow[]).map(mapIncomingRequest).find((item) => item.responseStatus === 'pending');
+        const pending = ((inbox.data || []) as IncomingDonorRequestRow[])
+          .map(mapIncomingRequest)
+          .find((item) => item.responseStatus === 'pending');
         setIncomingRequest(pending || null);
       }
     };
+
     void loadUnread();
-    const interval = setInterval(() => void loadUnread(), 8000);
+
+    const channel = supabase
+      .channel('home-feed-' + user?.id)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: 'user_id=eq.' + user?.id,
+        },
+        () => {
+          if (mounted) void loadUnread();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'blood_donor_responses',
+          filter: 'donor_id=eq.' + user?.id,
+        },
+        () => {
+          if (mounted) void loadUnread();
+        },
+      )
+      .subscribe();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && mounted) {
+        void loadUnread();
+      }
+    });
+
     return () => {
       mounted = false;
-      clearInterval(interval);
+      appStateSub.remove();
+      void supabase.removeChannel(channel);
     };
   }, [user?.id]);
 
@@ -551,13 +610,101 @@ type Donor = {
   area: string;
   phone: string;
   available: boolean;
+  isSameArea?: boolean;
   isNearby?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  distanceKm?: number | null;
+};
+
+const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
 };
 
 const NEARBY_DISTANCE_KM = 5;
 
+const KOLKATA_CENTER_COORDS = { latitude: 22.5726, longitude: 88.3639 };
+
+const KOLKATA_AREAS: Record<string, { latitude: number; longitude: number }> = {
+  'Park Street': { latitude: 22.5516, longitude: 88.3524 },
+  'Salt Lake': { latitude: 22.5867, longitude: 88.4178 },
+  'New Town': { latitude: 22.5898, longitude: 88.4744 },
+  'Howrah': { latitude: 22.5958, longitude: 88.2636 },
+  'Jadavpur': { latitude: 22.4988, longitude: 88.3718 },
+  'Behala': { latitude: 22.4988, longitude: 88.3149 },
+  'Garia': { latitude: 22.4646, longitude: 88.3846 },
+  'Shyambazar': { latitude: 22.6022, longitude: 88.3712 },
+  'Dum Dum': { latitude: 22.6420, longitude: 88.4312 },
+  'Ballygunge': { latitude: 22.5280, longitude: 88.3655 },
+  'Alipore': { latitude: 22.5312, longitude: 88.3298 },
+  'Barasat': { latitude: 22.7249, longitude: 88.4819 },
+  'Bhowanipore': { latitude: 22.5284, longitude: 88.3444 },
+  'Rajarhat': { latitude: 22.6288, longitude: 88.5194 },
+  'Tollygunge': { latitude: 22.4975, longitude: 88.3458 },
+  'Sealdah': { latitude: 22.5670, longitude: 88.3710 },
+  'Kankurgachi': { latitude: 22.5786, longitude: 88.3887 },
+  'Lake Gardens': { latitude: 22.5034, longitude: 88.3571 },
+};
+
+const POPULAR_KOLKATA_AREAS = [
+  'Salt Lake',
+  'New Town',
+  'Park Street',
+  'Howrah',
+  'Jadavpur',
+  'Behala',
+  'Garia',
+  'Shyambazar',
+  'Dum Dum',
+  'Ballygunge',
+  'Tollygunge',
+  'Barasat',
+];
+
+const getKolkataCoordsForArea = (areaText: string): { latitude: number; longitude: number } => {
+  const norm = areaText.toLowerCase().trim();
+  for (const [name, coords] of Object.entries(KOLKATA_AREAS)) {
+    if (norm.includes(name.toLowerCase()) || name.toLowerCase().includes(norm)) {
+      return coords;
+    }
+  }
+  return KOLKATA_CENTER_COORDS;
+};
+
+const isLocationOutsideKolkata = (lat: number, lon: number, cityName: string): boolean => {
+  const normCity = (cityName || '').toLowerCase().trim();
+  const kolkataKeywords = [
+    'kolkata',
+    'calcutta',
+    'howrah',
+    'bidhannagar',
+    'salt lake',
+    'new town',
+    'hooghly',
+    'barrackpore',
+    'dum dum',
+    'barasat',
+    'south 24 parganas',
+    'north 24 parganas',
+  ];
+  const dist = calculateDistanceKm(lat, lon, KOLKATA_CENTER_COORDS.latitude, KOLKATA_CENTER_COORDS.longitude);
+  const matchesKeyword = kolkataKeywords.some((kw) => normCity.includes(kw));
+  return dist > 45 || (!matchesKeyword && dist > 25);
+};
+
 const compatibleBloodGroups = (recipientGroup: string) => {
   switch (recipientGroup) {
+    case 'ALL': return ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
     case 'O+': return ['O+', 'O-'];
     case 'O-': return ['O-'];
     case 'A+': return ['A+', 'A-', 'O+', 'O-'];
@@ -602,67 +749,22 @@ function FindDonorScreen({
   const [sendingDonorId, setSendingDonorId] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
-
-  // Get the current device GPS position for proximity matching.
-  // Coordinates are kept in memory for the active search; when the user is an available
-  // donor, the latest coordinates are also stored on their private profile so other
-  // searches can perform server-side proximity matching without exposing exact coordinates.
-  useEffect(() => {
-    let mounted = true;
-
-    const updateGpsLocation = async () => {
-      if (!user?.id) return;
-
-      try {
-        let permission = await Location.getForegroundPermissionsAsync();
-        if (permission.status !== 'granted') {
-          permission = await Location.requestForegroundPermissionsAsync();
-        }
-
-        if (permission.status !== 'granted') {
-          return;
-        }
-
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        if (!mounted) return;
-
-        const coords = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        };
-        setGpsCoords(coords);
-
-        const profileResult = await supabase
-          .from('profiles')
-          .select('donor_available')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (!mounted) return;
-
-        if (profileResult.data?.donor_available === true) {
-          await supabase
-            .from('profiles')
-            .update({
-              latitude: coords.latitude,
-              longitude: coords.longitude,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', user.id);
-        }
-      } catch (err) {
-        console.warn('Unable to refresh GPS location for nearby donor matching:', err);
-      }
-    };
-
-    void updateGpsLocation();
-
-    return () => {
-      mounted = false;
-    };
-  }, [user?.id]);
+  const [deviceLocationCoords, setDeviceLocationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationPermissionStatus, setLocationPermissionStatus] = useState<'prompt' | 'granted' | 'denied' | 'checking'>('checking');
+  const [detectingLocation, setDetectingLocation] = useState(false);
+  const [showOutsideKolkataModal, setShowOutsideKolkataModal] = useState(false);
+  const [outsideModalStep, setOutsideModalStep] = useState<'askCitizen' | 'enterAddress'>('askCitizen');
+  const [detectedOutsideInfo, setDetectedOutsideInfo] = useState<{
+    city: string;
+    area: string;
+    latitude: number;
+    longitude: number;
+    distanceKm: number;
+  } | null>(null);
+  const [kolkataAddressDraft, setKolkataAddressDraft] = useState('');
+  const [savingKolkataAddress, setSavingKolkataAddress] = useState(false);
+  const [isRemoteKolkataResident, setIsRemoteKolkataResident] = useState(false);
+  const hasPromptedOutsideRef = useRef(false);
 
   // Fetch logged in user's profile to default to their blood group and city
   useEffect(() => {
@@ -672,7 +774,7 @@ function FindDonorScreen({
       try {
         const { data: prof } = await supabase
           .from('profiles')
-          .select('full_name, blood_group, city, area, phone, donor_available, is_test_account')
+          .select('full_name, blood_group, city, area, phone, donor_available, is_test_account, latitude, longitude')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -681,6 +783,10 @@ function FindDonorScreen({
         const city = prof?.city || 'Kolkata';
         const area = prof?.area || '';
         const available = Boolean(prof?.donor_available) && prof?.is_test_account !== true;
+
+        if (prof?.latitude != null && prof?.longitude != null) {
+          setDeviceLocationCoords({ latitude: prof.latitude, longitude: prof.longitude });
+        }
 
         setUserBloodGroup(blood);
         setUserCity(city);
@@ -695,6 +801,8 @@ function FindDonorScreen({
                 area,
                 phone: prof.phone || '',
                 available,
+                latitude: prof.latitude,
+                longitude: prof.longitude,
               }
             : null,
         );
@@ -762,34 +870,23 @@ function FindDonorScreen({
   const loadDonors = async (
     bloodGroup: string,
     mode: 'exact' | 'compatible',
-    currentCity: string
+    currentCity: string,
+    currentArea: string,
+    coordsOverride?: { latitude: number; longitude: number } | null
   ) => {
     setLoading(true);
     setErrorMessage('');
 
-    const targetCity = (currentCity || '').trim();
-    const bloodGroupsToQuery = mode === 'exact' ? [bloodGroup] : compatibleBloodGroups(bloodGroup);
+    const targetCity = (currentCity || 'Kolkata').trim();
+    const bloodGroupsToQuery =
+      bloodGroup === 'ALL'
+        ? []
+        : mode === 'exact'
+          ? [bloodGroup]
+          : compatibleBloodGroups(bloodGroup);
 
     try {
-      if (!targetCity) {
-        setDonors([]);
-        setErrorMessage('Add your city in Profile to find donors near you.');
-        return;
-      }
-
-      const rpcRes = await supabase.rpc('get_available_donors_with_nearby', {
-        p_blood_groups: bloodGroupsToQuery,
-        p_city: targetCity,
-        p_user_lat: gpsCoords?.latitude ?? null,
-        p_user_lng: gpsCoords?.longitude ?? null,
-        p_nearby_km: NEARBY_DISTANCE_KM,
-      });
-
-      if (rpcRes.error) {
-        throw new Error(rpcRes.error.message);
-      }
-
-      const rows = (rpcRes.data || []) as Array<{
+      let rows: Array<{
         id: string;
         full_name: string;
         blood_group: string;
@@ -797,25 +894,125 @@ function FindDonorScreen({
         area: string;
         phone?: string | null;
         donor_available: boolean;
-        is_nearby: boolean;
-      }>;
+        is_nearby?: boolean;
+        latitude?: number | null;
+        longitude?: number | null;
+      }> = [];
 
-      const mapped: Donor[] = rows.map((row) => ({
-        id: row.id,
-        name: row.full_name || 'BloodConnect Donor',
-        blood: row.blood_group,
-        city: row.city || targetCity,
-        area: row.area || '',
-        phone: row.phone || '',
-        available: row.donor_available ?? true,
-        isNearby: row.is_nearby === true,
-      }));
+      const refCoords = coordsOverride !== undefined ? coordsOverride : deviceLocationCoords;
+
+      // 1. Try GPS nearby RPC if coords available
+      if (refCoords?.latitude != null && refCoords?.longitude != null) {
+        const nearbyRes = await supabase.rpc('get_available_donors_with_nearby', {
+          p_blood_groups: bloodGroupsToQuery,
+          p_city: targetCity,
+          p_user_lat: refCoords.latitude,
+          p_user_lng: refCoords.longitude,
+          p_nearby_km: NEARBY_DISTANCE_KM,
+        });
+        if (!nearbyRes.error && Array.isArray(nearbyRes.data) && nearbyRes.data.length > 0) {
+          rows = nearbyRes.data;
+        }
+      }
+
+      // 2. Primary RPC query with user's city if not already loaded
+      if (rows.length === 0) {
+        const rpcRes = await supabase.rpc('get_available_donors', {
+          p_blood_groups: bloodGroupsToQuery,
+          p_city: targetCity,
+        });
+        if (!rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
+          rows = rpcRes.data;
+        }
+      }
+
+      // 3. Fallback: Query all registered donors across Kolkata / Bengal matching blood group
+      if (rows.length === 0) {
+        const broadRpc = await supabase.rpc('get_available_donors', {
+          p_blood_groups: bloodGroupsToQuery,
+          p_city: '',
+        });
+        if (!broadRpc.error && Array.isArray(broadRpc.data) && broadRpc.data.length > 0) {
+          rows = broadRpc.data;
+        } else {
+          // 4. Fallback: Direct select on profiles for all non-test accounts
+          let query = supabase
+            .from('profiles')
+            .select('id, full_name, blood_group, city, area, phone, donor_available, is_test_account, latitude, longitude')
+            .eq('is_test_account', false);
+
+          if (bloodGroup !== 'ALL' && bloodGroupsToQuery.length > 0) {
+            query = query.in('blood_group', bloodGroupsToQuery);
+          }
+          const directRes = await query;
+          if (!directRes.error && directRes.data) {
+            rows = directRes.data as typeof rows;
+          }
+        }
+      }
+
+      const normalizedArea = (currentArea || '').toLowerCase().trim();
+      const currentUserId = user?.id;
+
+      const mapped: Donor[] = rows
+        .filter((row) => row.id !== currentUserId)
+        .map((row) => {
+          const donorArea = (row.area || '').toLowerCase().trim();
+          const isSameArea = Boolean(
+            normalizedArea &&
+            donorArea &&
+            (donorArea.includes(normalizedArea) || normalizedArea.includes(donorArea))
+          );
+
+          let distanceKm: number | null = null;
+          if (refCoords && row.latitude != null && row.longitude != null) {
+            distanceKm = calculateDistanceKm(
+              refCoords.latitude,
+              refCoords.longitude,
+              row.latitude,
+              row.longitude
+            );
+          }
+
+          return {
+            id: row.id,
+            name: row.full_name || 'BloodConnect Donor',
+            blood: row.blood_group || 'Unknown',
+            city: row.city || targetCity,
+            area: row.area || '',
+            phone: row.phone || '',
+            available: row.donor_available ?? true,
+            isSameArea,
+            isNearby: row.is_nearby === true || (distanceKm != null && distanceKm <= NEARBY_DISTANCE_KM),
+            latitude: row.latitude,
+            longitude: row.longitude,
+            distanceKm,
+          };
+        });
 
       mapped.sort((a, b) => {
+        // Closest measured distance first
+        if (a.distanceKm != null && b.distanceKm != null) {
+          return a.distanceKm - b.distanceKm;
+        }
+        if (a.distanceKm != null && b.distanceKm == null) return -1;
+        if (a.distanceKm == null && b.distanceKm != null) return 1;
+
         if (a.isNearby && !b.isNearby) return -1;
         if (!a.isNearby && b.isNearby) return 1;
+
+        // Same area next
+        if (a.isSameArea && !b.isSameArea) return -1;
+        if (!a.isSameArea && b.isSameArea) return 1;
+
+        // Users with phone numbers next
         if (a.phone && !b.phone) return -1;
         if (!a.phone && b.phone) return 1;
+
+        // Available donors next
+        if (a.available && !b.available) return -1;
+        if (!a.available && b.available) return 1;
+
         return a.name.localeCompare(b.name);
       });
 
@@ -828,11 +1025,205 @@ function FindDonorScreen({
     }
   };
 
-  useEffect(() => {
-    void loadDonors(selectedBlood, filterMode, userCity);
-  }, [selectedBlood, filterMode, userCity, gpsCoords?.latitude, gpsCoords?.longitude]);
+  const detectAndSyncLocation = useCallback(async (userInitiated = true) => {
+    setDetectingLocation(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationPermissionStatus('denied');
+        if (userInitiated) {
+          showMessage(
+            'Location permission needed',
+            'Please allow location permission in your device settings so we can show and sort blood donors nearest to you.'
+          );
+        }
+        setDetectingLocation(false);
+        return;
+      }
 
-  const sendDonorRequest = async (donor: Donor) => {
+      setLocationPermissionStatus('granted');
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = position.coords;
+      const coords = { latitude, longitude };
+      setDeviceLocationCoords(coords);
+      setGpsCoords(coords);
+
+      let detectedCity = 'Kolkata';
+      let detectedArea = '';
+
+      if (Platform.OS !== 'web') {
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+          const place = places[0];
+          if (place) {
+            detectedCity = place.city || place.subregion || place.district || place.region || 'Kolkata';
+            detectedArea = place.district || place.subregion || place.name || '';
+          }
+        } catch {
+          // Reverse geocode can fail if offline or unavailable
+        }
+      }
+
+      const distFromKolkata = calculateDistanceKm(
+        latitude,
+        longitude,
+        KOLKATA_CENTER_COORDS.latitude,
+        KOLKATA_CENTER_COORDS.longitude
+      );
+      const isOutside = isLocationOutsideKolkata(latitude, longitude, detectedCity);
+
+      // If user device is detected outside Kolkata, ask if they are a citizen/resident of Kolkata
+      if (isOutside) {
+        setDetectedOutsideInfo({
+          city: detectedCity || 'Outside Kolkata',
+          area: detectedArea,
+          latitude,
+          longitude,
+          distanceKm: distFromKolkata,
+        });
+
+        if (userInitiated || !hasPromptedOutsideRef.current) {
+          hasPromptedOutsideRef.current = true;
+          setOutsideModalStep('askCitizen');
+          setKolkataAddressDraft(userArea || '');
+          setShowOutsideKolkataModal(true);
+          setDetectingLocation(false);
+          return;
+        }
+      }
+
+      const finalCity = detectedCity || 'Kolkata';
+      setUserCity(finalCity);
+      if (detectedArea) {
+        setUserArea(detectedArea);
+      }
+
+      // Sync user's real location into their profile so other donors can also see them nearby accurately
+      if (user?.id) {
+        void supabase
+          .from('profiles')
+          .update({
+            latitude,
+            longitude,
+            city: finalCity,
+            ...(detectedArea ? { area: detectedArea } : {}),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+      }
+
+      void loadDonors(selectedBlood, filterMode, finalCity, detectedArea || userArea, coords);
+      if (userInitiated) {
+        showMessage(
+          'Location updated',
+          `Current location detected: ${detectedArea ? detectedArea + ', ' : ''}${finalCity}. Showing nearest donors first.`
+        );
+      }
+    } catch (error) {
+      if (userInitiated) {
+        showMessage('Location Error', error instanceof Error ? error.message : 'Unable to acquire location.');
+      }
+    } finally {
+      setDetectingLocation(false);
+    }
+  }, [user?.id, selectedBlood, filterMode, userArea]);
+
+  const handleConfirmKolkataCitizen = useCallback(async (enteredAddress: string) => {
+    setSavingKolkataAddress(true);
+    const chosenArea = (enteredAddress || userArea || 'Central Kolkata').trim();
+    const kolkataCoords = getKolkataCoordsForArea(chosenArea);
+
+    setUserCity('Kolkata');
+    setUserArea(chosenArea);
+    setDeviceLocationCoords(kolkataCoords);
+    setGpsCoords(kolkataCoords);
+    setIsRemoteKolkataResident(true);
+    setShowOutsideKolkataModal(false);
+    setSavingKolkataAddress(false);
+
+    if (user?.id) {
+      void supabase
+        .from('profiles')
+        .update({
+          city: 'Kolkata',
+          area: chosenArea,
+          latitude: kolkataCoords.latitude,
+          longitude: kolkataCoords.longitude,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+    }
+
+    void loadDonors(selectedBlood, filterMode, 'Kolkata', chosenArea, kolkataCoords);
+    showMessage(
+      'Kolkata Location Active',
+      `Showing blood donors nearest to ${chosenArea}, Kolkata.`
+    );
+  }, [user?.id, userArea, selectedBlood, filterMode]);
+
+  const handleDeclineKolkataCitizen = useCallback(() => {
+    setShowOutsideKolkataModal(false);
+    if (!detectedOutsideInfo) return;
+
+    const { city, area, latitude, longitude } = detectedOutsideInfo;
+    const coords = { latitude, longitude };
+    setUserCity(city);
+    if (area) setUserArea(area);
+    setDeviceLocationCoords(coords);
+    setGpsCoords(coords);
+    setIsRemoteKolkataResident(false);
+
+    if (user?.id) {
+      void supabase
+        .from('profiles')
+        .update({
+          city,
+          ...(area ? { area } : {}),
+          latitude,
+          longitude,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+    }
+
+    void loadDonors(selectedBlood, filterMode, city, area, coords);
+    showMessage('Location Set', `Location set to ${area ? area + ', ' : ''}${city}.`);
+  }, [detectedOutsideInfo, user?.id, selectedBlood, filterMode]);
+
+  useEffect(() => {
+    let active = true;
+    const initLocation = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          if (active) setLocationPermissionStatus('granted');
+          void detectAndSyncLocation(false);
+        } else {
+          // Ask user to turn on location before finding donors
+          const req = await Location.requestForegroundPermissionsAsync();
+          if (active) {
+            setLocationPermissionStatus(req.status === 'granted' ? 'granted' : 'denied');
+            if (req.status === 'granted') {
+              void detectAndSyncLocation(false);
+            }
+          }
+        }
+      } catch {
+        if (active) setLocationPermissionStatus('denied');
+      }
+    };
+
+    void initLocation();
+    return () => {
+      active = false;
+    };
+  }, [detectAndSyncLocation]);
+
+  useEffect(() => {
+    void loadDonors(selectedBlood, filterMode, userCity, userArea, deviceLocationCoords);
+  }, [selectedBlood, filterMode, userCity, userArea, deviceLocationCoords]);
+
+  const sendDonorRequest = useCallback(async (donor: Donor) => {
     if (!requestId) return;
     setSendingDonorId(donor.id);
     setErrorMessage('');
@@ -849,9 +1240,9 @@ function FindDonorScreen({
     } finally {
       setSendingDonorId(null);
     }
-  };
+  }, [requestId]);
 
-  const requestDonor = (donor: Donor) => {
+  const requestDonor = useCallback((donor: Donor) => {
     if (!requestId) {
       showMessage('Contact Donor Directly', `You can contact ${donor.name} directly using the Call, SMS, or WhatsApp buttons below.`);
       return;
@@ -866,9 +1257,9 @@ function FindDonorScreen({
       { text: 'Cancel', style: 'cancel' },
       { text: 'Send Request', onPress: () => void sendDonorRequest(donor) },
     ]);
-  };
+  }, [requestId, sendDonorRequest]);
 
-  const handleCall = (phone: string, donorName: string) => {
+  const handleCall = useCallback((phone: string, donorName: string) => {
     const cleanPhone = phone.replace(/[^\d+]/g, '');
     if (!cleanPhone) {
       showMessage('Contact Info', `${donorName} has not shared a direct phone number yet.`);
@@ -877,9 +1268,9 @@ function FindDonorScreen({
     void Linking.openURL(`tel:${cleanPhone}`).catch(() => {
       showMessage('Unable to place call', `Please dial ${cleanPhone} directly.`);
     });
-  };
+  }, []);
 
-  const handleSMS = (phone: string, donorName: string, bloodGroup: string) => {
+  const handleSMS = useCallback((phone: string, donorName: string, bloodGroup: string) => {
     const cleanPhone = phone.replace(/[^\d+]/g, '');
     if (!cleanPhone) {
       showMessage('Contact Info', `${donorName} has not shared a direct phone number yet.`);
@@ -892,9 +1283,9 @@ function FindDonorScreen({
     void Linking.openURL(`sms:${cleanPhone}${separator}body=${message}`).catch(() => {
       showMessage('Unable to send SMS', `Please text ${cleanPhone} directly.`);
     });
-  };
+  }, [userCity]);
 
-  const handleWhatsApp = (phone: string, donorName: string, bloodGroup: string) => {
+  const handleWhatsApp = useCallback((phone: string, donorName: string, bloodGroup: string) => {
     let cleanPhone = phone.replace(/[^\d]/g, '');
     if (!cleanPhone) {
       showMessage('Contact Info', `${donorName} has not shared a direct phone number yet.`);
@@ -909,38 +1300,45 @@ function FindDonorScreen({
     void Linking.openURL(`https://wa.me/${cleanPhone}?text=${message}`).catch(() => {
       showMessage('WhatsApp', 'Unable to open WhatsApp. Please check if the app is installed.');
     });
-  };
+  }, [userCity]);
 
-  const filteredDonors = donors.filter((d) => {
-    if (!searchQuery.trim()) return true;
+  const filteredDonors = useMemo(() => {
+    if (!searchQuery.trim()) return donors;
     const q = searchQuery.toLowerCase().trim();
-    return (
+    return donors.filter((d) => (
       d.name.toLowerCase().includes(q) ||
       d.city.toLowerCase().includes(q) ||
       d.area.toLowerCase().includes(q) ||
-      d.blood.toLowerCase().includes(q)
-    );
-  });
+      d.blood.toLowerCase().includes(q) ||
+      d.phone.toLowerCase().includes(q)
+    ));
+  }, [donors, searchQuery]);
 
-  const visibleMyDonorProfile =
-    myDonorProfile &&
-    myDonorProfile.available &&
-    (!userCity.trim() ||
-      !myDonorProfile.city.trim() ||
-      myDonorProfile.city.toLowerCase().trim().split(',')[0].trim() ===
-        userCity.toLowerCase().trim().split(',')[0].trim()) &&
-    (filterMode === 'exact'
-      ? myDonorProfile.blood === selectedBlood
-      : compatibleBloodGroups(selectedBlood).includes(myDonorProfile.blood)) &&
-    (!searchQuery.trim() ||
-      myDonorProfile.name.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      myDonorProfile.city.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      myDonorProfile.area.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      myDonorProfile.blood.toLowerCase().includes(searchQuery.toLowerCase().trim()))
-      ? myDonorProfile
-      : null;
+  const visibleMyDonorProfile = useMemo(() => {
+    if (!myDonorProfile) return null;
+    const matchesBlood =
+      selectedBlood === 'ALL'
+        ? true
+        : filterMode === 'exact'
+          ? myDonorProfile.blood === selectedBlood
+          : compatibleBloodGroups(selectedBlood).includes(myDonorProfile.blood);
+    if (!matchesBlood) return null;
 
-  const visibleDonorCount = filteredDonors.length + (visibleMyDonorProfile ? 1 : 0);
+    if (!searchQuery.trim()) return myDonorProfile;
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch =
+      myDonorProfile.name.toLowerCase().includes(q) ||
+      myDonorProfile.city.toLowerCase().includes(q) ||
+      myDonorProfile.area.toLowerCase().includes(q) ||
+      myDonorProfile.blood.toLowerCase().includes(q) ||
+      myDonorProfile.phone.toLowerCase().includes(q);
+    return matchesSearch ? myDonorProfile : null;
+  }, [myDonorProfile, filterMode, selectedBlood, searchQuery]);
+
+  const visibleDonorCount = useMemo(
+    () => filteredDonors.length + (visibleMyDonorProfile ? 1 : 0),
+    [filteredDonors.length, visibleMyDonorProfile]
+  );
 
   return (
     <View style={styles.findDonorScreen}>
@@ -974,6 +1372,37 @@ function FindDonorScreen({
       </View>
 
       <ScrollView style={styles.findDonorScroll} contentContainerStyle={styles.findDonorContent} showsVerticalScrollIndicator={false}>
+        {locationPermissionStatus !== 'granted' ? (
+          <View style={styles.locationBanner}>
+            <View style={styles.locationBannerHeader}>
+              <View style={styles.locationBannerIconWrap}>
+                <MaterialCommunityIcons name="map-marker-radius" size={24} color="#760009" />
+              </View>
+              <View style={styles.locationBannerTextWrap}>
+                <Text style={styles.locationBannerTitle}>Turn On Device Location</Text>
+                <Text style={styles.locationBannerSubtitle}>
+                  Enable GPS so we can find and sort the nearest available blood donors closest to you.
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              style={styles.locationBannerButton}
+              onPress={() => void detectAndSyncLocation(true)}
+              disabled={detectingLocation}
+              accessibilityLabel="Turn on location permission"
+            >
+              {detectingLocation ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="crosshairs-gps" size={16} color="#ffffff" />
+                  <Text style={styles.locationBannerButtonText}>Turn On Location</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+
         {request ? (
           <View style={styles.findDonorCard}>
             <Text style={styles.findDonorLabel}>Blood request</Text>
@@ -984,6 +1413,25 @@ function FindDonorScreen({
             <Text style={styles.findDonorMeta}>
               {[request.area, request.city].filter(Boolean).join(', ')} • {formatRequestDeadline(request)}
             </Text>
+            {locationPermissionStatus === 'granted' ? (
+              <View style={styles.gpsStatusRow}>
+                <View style={styles.gpsStatusBadge}>
+                  <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
+                  <Text style={styles.gpsStatusText}>
+                    {detectingLocation ? 'Updating GPS...' : 'Accurate GPS Active • Sorted by nearest'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.locationRefreshBtn}
+                  onPress={() => void detectAndSyncLocation(true)}
+                  disabled={detectingLocation}
+                  accessibilityLabel="Refresh GPS location"
+                >
+                  <MaterialCommunityIcons name="refresh" size={13} color="#760009" />
+                  <Text style={styles.locationRefreshText}>Update</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         ) : (
           <View style={styles.findDonorCard}>
@@ -1004,6 +1452,45 @@ function FindDonorScreen({
             <Text style={styles.findDonorSubtitle}>
               Showing verified {filterMode === 'exact' ? selectedBlood : 'compatible'} blood donors available in {userCity || 'Kolkata'}. Reach out directly via call or message.
             </Text>
+            {isRemoteKolkataResident ? (
+              <View style={styles.remoteKolkataNotice}>
+                <View style={styles.remoteKolkataNoticeLeft}>
+                  <MaterialCommunityIcons name="home-city" size={16} color="#065f46" />
+                  <Text style={styles.remoteKolkataNoticeText}>
+                    Kolkata Citizen Mode: Nearest to {userArea || 'Kolkata'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setOutsideModalStep('enterAddress');
+                    setKolkataAddressDraft(userArea || '');
+                    setShowOutsideKolkataModal(true);
+                  }}
+                  accessibilityLabel="Change Kolkata address"
+                >
+                  <Text style={styles.remoteKolkataChangeBtn}>Change</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {locationPermissionStatus === 'granted' ? (
+              <View style={styles.gpsStatusRow}>
+                <View style={styles.gpsStatusBadge}>
+                  <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
+                  <Text style={styles.gpsStatusText}>
+                    {detectingLocation ? 'Updating GPS...' : 'Accurate GPS Active • Sorted by nearest'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.locationRefreshBtn}
+                  onPress={() => void detectAndSyncLocation(true)}
+                  disabled={detectingLocation}
+                  accessibilityLabel="Refresh GPS location"
+                >
+                  <MaterialCommunityIcons name="refresh" size={13} color="#760009" />
+                  <Text style={styles.locationRefreshText}>Update</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -1015,7 +1502,7 @@ function FindDonorScreen({
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bloodChoiceRow}>
-          {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => (
+          {['ALL', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => (
             <Pressable
               key={group}
               onPress={() => setSelectedBlood(group)}
@@ -1030,31 +1517,41 @@ function FindDonorScreen({
         </ScrollView>
 
         <View style={styles.modeToggleRow}>
-          <Pressable
-            style={[styles.modeToggleChip, filterMode === 'exact' && styles.modeToggleChipActive]}
-            onPress={() => setFilterMode('exact')}
-            accessibilityLabel={`Exact ${selectedBlood} donors only`}
-          >
-            <Text style={[styles.modeToggleText, filterMode === 'exact' && styles.modeToggleTextActive]}>
-              Exact {selectedBlood} Donors
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.modeToggleChip, filterMode === 'compatible' && styles.modeToggleChipActive]}
-            onPress={() => setFilterMode('compatible')}
-            accessibilityLabel={`Compatible donors for ${selectedBlood}`}
-          >
-            <Text style={[styles.modeToggleText, filterMode === 'compatible' && styles.modeToggleTextActive]}>
-              All Compatible ({compatibleBloodGroups(selectedBlood).join(', ')})
-            </Text>
-          </Pressable>
+          {selectedBlood === 'ALL' ? (
+            <View style={[styles.modeToggleChip, styles.modeToggleChipActive]}>
+              <Text style={[styles.modeToggleText, styles.modeToggleTextActive]}>
+                All Blood Groups ({visibleDonorCount} Users)
+              </Text>
+            </View>
+          ) : (
+            <>
+              <Pressable
+                style={[styles.modeToggleChip, filterMode === 'exact' && styles.modeToggleChipActive]}
+                onPress={() => setFilterMode('exact')}
+                accessibilityLabel={`Exact ${selectedBlood} donors only`}
+              >
+                <Text style={[styles.modeToggleText, filterMode === 'exact' && styles.modeToggleTextActive]}>
+                  Exact {selectedBlood} Donors
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modeToggleChip, filterMode === 'compatible' && styles.modeToggleChipActive]}
+                onPress={() => setFilterMode('compatible')}
+                accessibilityLabel={`Compatible donors for ${selectedBlood}`}
+              >
+                <Text style={[styles.modeToggleText, filterMode === 'compatible' && styles.modeToggleTextActive]}>
+                  All Compatible ({compatibleBloodGroups(selectedBlood).join(', ')})
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
         <View style={styles.searchBar}>
           <MaterialCommunityIcons name="magnify" size={20} color="#59413e" />
           <TextInput
             style={styles.searchInput}
-            placeholder={`Filter by area or name in ${userCity || 'Kolkata'}...`}
+            placeholder={`Filter by name, phone, area in ${userCity || 'Kolkata'}...`}
             placeholderTextColor="#8d706d"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1072,7 +1569,13 @@ function FindDonorScreen({
           <View style={styles.findDonorResultsHeader}>
             <View>
               <Text style={styles.findDonorSectionTitle}>
-                {visibleDonorCount} {filterMode === 'exact' ? selectedBlood : 'Compatible'} {visibleDonorCount === 1 ? 'Donor' : 'Donors'} Found
+                {visibleDonorCount}{' '}
+                {selectedBlood === 'ALL'
+                  ? 'Registered Donors'
+                  : filterMode === 'exact'
+                    ? selectedBlood + ' Donors'
+                    : 'Compatible Donors'}{' '}
+                Found
               </Text>
               <Text style={styles.findDonorLabel}>
                 In {userCity || 'Kolkata'}{userArea ? ` • Prioritizing ${userArea}` : ''}
@@ -1111,7 +1614,24 @@ function FindDonorScreen({
                       <Text style={styles.donorMeta}>
                         📍 {[visibleMyDonorProfile.city || userCity || 'Kolkata', visibleMyDonorProfile.area].filter(Boolean).join(' / ')}
                       </Text>
+                      <View style={styles.nearestBadge}>
+                        <MaterialCommunityIcons name="navigation-variant" size={13} color="#065f46" />
+                        <Text style={styles.nearestBadgeText}>Your Profile (0 km)</Text>
+                      </View>
                     </View>
+                  </View>
+
+                  <View style={styles.donorContactBox}>
+                    <Pressable
+                      style={styles.donorPhoneRow}
+                      onPress={onProfile}
+                      accessibilityLabel={`Your phone number: ${visibleMyDonorProfile.phone || 'not added'}`}
+                    >
+                      <MaterialCommunityIcons name="phone" size={16} color="#760009" />
+                      <Text style={styles.donorPhoneText}>
+                        {visibleMyDonorProfile.phone ? visibleMyDonorProfile.phone : 'Phone not added yet (tap to update in Profile)'}
+                      </Text>
+                    </Pressable>
                   </View>
 
                   <View style={styles.myDonorNotice}>
@@ -1147,24 +1667,46 @@ function FindDonorScreen({
                       <Text style={styles.donorMeta}>
                         📍 {[donor.area, donor.city].filter(Boolean).join(', ') || userCity || 'Kolkata'}
                       </Text>
-                      {donor.isNearby ? (
+                      {donor.distanceKm != null ? (
+                        <View style={styles.nearestBadge}>
+                          <MaterialCommunityIcons name="navigation-variant" size={13} color="#065f46" />
+                          <Text style={styles.nearestBadgeText}>
+                            {donor.distanceKm < 1 ? '< 1 km away' : `${donor.distanceKm.toFixed(1)} km away`}
+                          </Text>
+                        </View>
+                      ) : donor.isNearby ? (
                         <View style={styles.sameAreaBadge}>
                           <MaterialCommunityIcons name="crosshairs-gps" size={13} color="#065f46" />
                           <Text style={styles.sameAreaBadgeText}>Near You (GPS)</Text>
                         </View>
+                      ) : donor.isSameArea ? (
+                        <View style={styles.sameAreaBadge}>
+                          <MaterialCommunityIcons name="map-marker-radius" size={13} color="#065f46" />
+                          <Text style={styles.sameAreaBadgeText}>Near You ({donor.area})</Text>
+                        </View>
                       ) : null}
                     </View>
 
-                    <Text style={styles.availableBadge}>Available</Text>
+                    <Text style={donor.available ? styles.availableBadge : styles.unavailableBadge}>
+                      {donor.available ? 'Available' : 'Registered'}
+                    </Text>
                   </View>
 
                   <View style={styles.donorContactBox}>
-                    <View style={styles.donorPhoneRow}>
+                    <Pressable
+                      style={styles.donorPhoneRow}
+                      onPress={() => donor.phone && handleCall(donor.phone, donor.name)}
+                      disabled={!donor.phone}
+                      accessibilityLabel={`Phone number ${donor.phone || 'not provided'}`}
+                    >
                       <MaterialCommunityIcons name="phone" size={16} color="#760009" />
                       <Text style={styles.donorPhoneText}>
                         {donor.phone ? donor.phone : 'Phone not provided'}
                       </Text>
-                    </View>
+                      {donor.phone ? (
+                        <MaterialCommunityIcons name="phone-outgoing" size={14} color="#760009" style={{ marginLeft: 4 }} />
+                      ) : null}
+                    </Pressable>
 
                     <View style={styles.contactActionsRow}>
                       {donor.phone ? (
@@ -1278,6 +1820,130 @@ function FindDonorScreen({
           <Text style={styles.bottomNavText}>Profile</Text>
         </Pressable>
       </View>
+
+      {/* Outside Kolkata Citizen Prompt Modal */}
+      <Modal
+        visible={showOutsideKolkataModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOutsideKolkataModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.outsideModalOverlay}
+        >
+          <View style={styles.outsideModalCard}>
+            {outsideModalStep === 'askCitizen' ? (
+              <>
+                <View style={styles.outsideModalIconWrap}>
+                  <MaterialCommunityIcons name="map-marker-question" size={32} color="#760009" />
+                </View>
+                <Text style={styles.outsideModalTitle}>Are you a citizen of Kolkata?</Text>
+                <Text style={styles.outsideModalDesc}>
+                  We detected your device location as{' '}
+                  <Text style={{ fontWeight: '700', color: '#191c1e' }}>
+                    {[detectedOutsideInfo?.area, detectedOutsideInfo?.city].filter(Boolean).join(', ') || 'Outside Kolkata'}
+                  </Text>
+                  {detectedOutsideInfo?.distanceKm
+                    ? ` (~${Math.round(detectedOutsideInfo.distanceKm)} km from Kolkata)`
+                    : ''}
+                  .
+                </Text>
+                <Text style={styles.outsideModalSubtext}>
+                  If you are originally from or living in Kolkata, enter your Kolkata address to see and sort blood donors nearest to your home.
+                </Text>
+
+                <View style={styles.outsideModalBtnColumn}>
+                  <Pressable
+                    style={styles.outsideModalPrimaryBtn}
+                    onPress={() => setOutsideModalStep('enterAddress')}
+                    accessibilityLabel="Yes, I am a citizen of Kolkata"
+                  >
+                    <MaterialCommunityIcons name="check-circle" size={18} color="#ffffff" />
+                    <Text style={styles.outsideModalPrimaryBtnText}>Yes, I'm from Kolkata</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.outsideModalSecondaryBtn}
+                    onPress={handleDeclineKolkataCitizen}
+                    accessibilityLabel={`No, continue with ${detectedOutsideInfo?.city || 'current location'}`}
+                  >
+                    <Text style={styles.outsideModalSecondaryBtnText}>
+                      No, use {detectedOutsideInfo?.city || 'current location'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.outsideModalIconWrap}>
+                  <MaterialCommunityIcons name="home-city" size={32} color="#760009" />
+                </View>
+                <Text style={styles.outsideModalTitle}>Your Kolkata Address</Text>
+                <Text style={styles.outsideModalDesc}>
+                  Enter your address or neighborhood in Kolkata so we can sort and show the nearest blood donors closest to you.
+                </Text>
+
+                <TextInput
+                  style={styles.outsideModalInput}
+                  placeholder="e.g. Salt Lake, Jadavpur, Behala, Park Street..."
+                  placeholderTextColor="#8d706d"
+                  value={kolkataAddressDraft}
+                  onChangeText={setKolkataAddressDraft}
+                  autoFocus
+                />
+
+                <Text style={styles.outsideModalChipsLabel}>Or select common neighborhood:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.outsideModalChipsScroll}>
+                  {POPULAR_KOLKATA_AREAS.map((areaName) => (
+                    <Pressable
+                      key={areaName}
+                      style={[
+                        styles.outsideAreaChip,
+                        kolkataAddressDraft.toLowerCase() === areaName.toLowerCase() && styles.outsideAreaChipSelected,
+                      ]}
+                      onPress={() => setKolkataAddressDraft(areaName)}
+                    >
+                      <Text
+                        style={[
+                          styles.outsideAreaChipText,
+                          kolkataAddressDraft.toLowerCase() === areaName.toLowerCase() && styles.outsideAreaChipTextSelected,
+                        ]}
+                      >
+                        {areaName}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+
+                <View style={styles.outsideModalBtnRow}>
+                  <Pressable
+                    style={styles.outsideModalBackBtn}
+                    onPress={() => setOutsideModalStep('askCitizen')}
+                    disabled={savingKolkataAddress}
+                    accessibilityLabel="Go back"
+                  >
+                    <Text style={styles.outsideModalBackBtnText}>Back</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={styles.outsideModalSubmitBtn}
+                    onPress={() => void handleConfirmKolkataCitizen(kolkataAddressDraft)}
+                    disabled={savingKolkataAddress}
+                    accessibilityLabel="Save Kolkata address and find nearby donors"
+                  >
+                    {savingKolkataAddress ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.outsideModalSubmitBtnText}>Set & Find Donors</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -1394,9 +2060,8 @@ function RequestsScreen({
     setLoading(true);
     setErrorMessage('');
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      setErrorMessage(userError?.message || 'You must be signed in to view requests.');
+    if (!user) {
+      setErrorMessage('You must be signed in to view requests.');
       setLoading(false);
       return;
     }
@@ -1405,7 +2070,7 @@ function RequestsScreen({
       supabase
         .from('blood_requests')
         .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
-        .eq('requester_id', userData.user.id)
+        .eq('requester_id', user.id)
         .neq('status', 'cancelled')
         .neq('patient_name', 'Donor Directory Seeker')
         .neq('patient_name', 'Donor Inquiry')
@@ -1445,6 +2110,45 @@ function RequestsScreen({
 
   useEffect(() => {
     void loadRequests();
+
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel('requests-screen-' + user.id)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'blood_requests',
+        },
+        () => {
+          void loadRequests();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'blood_donor_responses',
+        },
+        () => {
+          void loadRequests();
+        },
+      )
+      .subscribe();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        void loadRequests();
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+      void supabase.removeChannel(channel);
+    };
   }, [user?.id]);
 
   const respondToDonorRequest = async (item: IncomingDonorRequest, status: 'accepted' | 'declined') => {
@@ -1889,11 +2593,47 @@ function BloodRequestDetailsScreen({
 
   useEffect(() => {
     void refreshRequest(true);
-    const interval = setInterval(() => {
-      void refreshRequest(false);
-    }, 5000);
 
-    return () => clearInterval(interval);
+    if (!requestId) return;
+
+    const channel = supabase
+      .channel('request-details-' + requestId)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'blood_requests',
+          filter: 'id=eq.' + requestId,
+        },
+        () => {
+          void refreshRequest(false);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'donor_responses',
+          filter: 'request_id=eq.' + requestId,
+        },
+        () => {
+          void refreshRequest(false);
+        },
+      )
+      .subscribe();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        void refreshRequest(false);
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+      void supabase.removeChannel(channel);
+    };
   }, [requestId]);
 
   const openEditRequest = () => {
@@ -2379,9 +3119,8 @@ function ProfileScreen({
     setProfileLoading(true);
     setProfileError('');
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      setProfileError(userError?.message || 'Your authenticated user could not be found.');
+    if (!user) {
+      setProfileError('Your authenticated user could not be found.');
       setProfileLoading(false);
       return;
     }
@@ -2389,13 +3128,13 @@ function ProfileScreen({
     const { data, error } = await supabase
       .from('profiles')
       .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, emergency_contact_name, emergency_contact_phone')
-      .eq('id', userData.user.id)
+      .eq('id', user.id)
       .maybeSingle();
 
     const latestRequestResult = await supabase
       .from('blood_requests')
       .select('id, patient_name, blood_group, units_required, hospital_name, hospital_address, city, area, required_date, required_time, status, is_emergency, contact_phone')
-      .eq('requester_id', userData.user.id)
+      .eq('requester_id', user.id)
       .neq('status', 'cancelled')
       .neq('patient_name', 'Donor Directory Seeker')
       .neq('patient_name', 'Donor Inquiry')
@@ -2411,7 +3150,7 @@ function ProfileScreen({
     const contactResult = await supabase
       .from('emergency_contacts')
       .select('id, name, phone, relationship')
-      .eq('user_id', userData.user.id)
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -2464,12 +3203,11 @@ function ProfileScreen({
   }, [user]);
 
   const updateProfileRow = async (updates: Record<string, string | boolean | null>) => {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      throw new Error(userError?.message || 'Your authenticated user could not be found.');
+    if (!user) {
+      throw new Error('Your authenticated user could not be found.');
     }
 
-    const { error } = await supabase.from('profiles').update(updates).eq('id', userData.user.id);
+    const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
     if (error) throw new Error(error.message);
   };
 
@@ -4855,6 +5593,17 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontWeight: '700',
   },
+  unavailableBadge: {
+    alignSelf: 'flex-start',
+    color: '#59413e',
+    backgroundColor: '#f0eae8',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+  },
   privacyNotice: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4885,6 +5634,314 @@ const styles = StyleSheet.create({
     color: '#065f46',
     fontSize: 11,
     lineHeight: 15,
+    fontWeight: '700',
+  },
+  nearestBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#d1fae5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  nearestBadgeText: {
+    color: '#065f46',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  locationBanner: {
+    backgroundColor: '#fef2f2',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1.5,
+    borderColor: '#fecaca',
+  },
+  locationBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  locationBannerIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#fee2e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationBannerTextWrap: {
+    flex: 1,
+  },
+  locationBannerTitle: {
+    color: '#991b1b',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  locationBannerSubtitle: {
+    color: '#7f1d1d',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  locationBannerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#991b1b',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  locationBannerButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  gpsStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#ffdad6',
+  },
+  gpsStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  gpsStatusText: {
+    color: '#065f46',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  locationRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#ffdad6',
+  },
+  locationRefreshText: {
+    color: '#760009',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  remoteKolkataNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  remoteKolkataNoticeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  remoteKolkataNoticeText: {
+    color: '#065f46',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+    flex: 1,
+  },
+  remoteKolkataChangeBtn: {
+    color: '#760009',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+    paddingLeft: 8,
+  },
+  outsideModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  outsideModalCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  outsideModalIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  outsideModalTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
+    color: '#191c1e',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  outsideModalDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#59413e',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  outsideModalSubtext: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#760009',
+    textAlign: 'center',
+    backgroundColor: '#fff1f0',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 18,
+    width: '100%',
+  },
+  outsideModalBtnColumn: {
+    width: '100%',
+    gap: 10,
+  },
+  outsideModalPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#760009',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  outsideModalPrimaryBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  outsideModalSecondaryBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d0d4d8',
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  outsideModalSecondaryBtnText: {
+    color: '#59413e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  outsideModalInput: {
+    width: '100%',
+    borderWidth: 1.5,
+    borderColor: '#ffdad6',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#191c1e',
+    backgroundColor: '#fbf8f8',
+    marginBottom: 12,
+  },
+  outsideModalChipsLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#59413e',
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  outsideModalChipsScroll: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: 14,
+  },
+  outsideAreaChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#f2f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  outsideAreaChipSelected: {
+    backgroundColor: '#760009',
+    borderColor: '#760009',
+  },
+  outsideAreaChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#59413e',
+  },
+  outsideAreaChipTextSelected: {
+    color: '#ffffff',
+  },
+  outsideModalBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+    marginTop: 8,
+  },
+  outsideModalBackBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#d0d4d8',
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outsideModalBackBtnText: {
+    color: '#59413e',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  outsideModalSubmitBtn: {
+    flex: 2,
+    backgroundColor: '#760009',
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outsideModalSubmitBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
     fontWeight: '700',
   },
   donorContactBox: {

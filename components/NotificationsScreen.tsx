@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../utils/supabase';
@@ -93,25 +93,37 @@ export function NotificationsScreen({
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'notifications',
           filter: 'user_id=eq.' + userId,
         },
         (payload) => {
-          const row = payload.new as NotificationItem;
-          setItems((current) => [row, ...current.filter((item) => item.id !== row.id)]);
+          if (payload.eventType === 'INSERT') {
+            const row = payload.new as NotificationItem;
+            setItems((current) => [row, ...current.filter((item) => item.id !== row.id)]);
+          } else if (payload.eventType === 'UPDATE') {
+            const row = payload.new as NotificationItem;
+            setItems((current) => current.map((item) => (item.id === row.id ? row : item)));
+          } else if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as { id?: string };
+            if (oldRow?.id) {
+              setItems((current) => current.filter((item) => item.id !== oldRow.id));
+            }
+          }
         },
       )
       .subscribe();
 
-    const interval = setInterval(() => {
-      void loadNotifications(false);
-    }, 8000);
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        void loadNotifications(false);
+      }
+    });
 
     return () => {
       clearTimeout(initialLoad);
-      clearInterval(interval);
+      appStateSub.remove();
       void supabase.removeChannel(channel);
     };
   }, [loadNotifications, userId]);

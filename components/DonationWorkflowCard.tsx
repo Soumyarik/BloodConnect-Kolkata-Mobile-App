@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../utils/supabase';
@@ -137,12 +137,47 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     const initialLoad = setTimeout(() => {
       void refresh(true);
     }, 0);
-    const interval = setInterval(() => void refresh(false), 5000);
+
+    const channel = supabase
+      .channel('donation-workflow-' + requestId)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'blood_donor_responses',
+          filter: 'request_id=eq.' + requestId,
+        },
+        () => {
+          void refresh(false);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'donation_events',
+          filter: 'request_id=eq.' + requestId,
+        },
+        () => {
+          void refresh(false);
+        },
+      )
+      .subscribe();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        void refresh(false);
+      }
+    });
+
     return () => {
       clearTimeout(initialLoad);
-      clearInterval(interval);
+      appStateSub.remove();
+      void supabase.removeChannel(channel);
     };
-  }, [refresh]);
+  }, [refresh, requestId]);
 
   const selectDonor = async (responseId: string) => {
     setBusy(true);

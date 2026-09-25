@@ -44,7 +44,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow BloodConnect to use your location while creating or updating a blood request."
+          "locationWhenInUsePermission": "Allow BloodConnect to access your location to find the nearest blood donors and calculate accurate distances."
         }
       ],
       "expo-font",
