@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
+  Easing,
   Image,
+  ImageSourcePropType,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,6 +20,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
@@ -100,60 +103,67 @@ const mapOpenBloodRequest = (row: OpenBloodRequestRow): OpenBloodRequest => ({
   isEmergency: row.is_emergency, status: row.status, createdAt: row.created_at,
 });
 
-const KOLKATA_BACKGROUND_IMAGES: string[] = [
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSadZs5pbo8PkScagmAakfeZLX9SQUc6qe7cFq6P7HmrisdJStiZp7ChYc&s',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ_yQOH9QfAdtc7IPz652m-6ZNzOk4j1LNeoswpUfLSMYp7CJ71OSBQBhg&s',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQK-6DJozbaR-sKb0djgs6RN5d8iLalxYge-fhJ72K62w&s=10',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSiEoToNFCfXsbjIi1DTHRZWiiUqRHbYo6x7y99mdHa0A&s=10',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR_5_sF7vst7DJaFB5Qpp1vvZChpny4xD4idVsU_SX3PQ&s=10',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJaSfKLOdHU6uM4BdWqVQYn1Y6Z4UZmWxlEdHffFy3M5xmOKK3f1JeNz8&s=10',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjNydE-PsyHvwmYkPydIbrUVfgellHSw-hNdXhPOebNA&s=10',
-  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRENyNkFgGlL7tBLfTt84Co-N7m8Wh3QiwtxeEUXLG1AA&s=10',
+interface KolkataHeroSlide {
+  source: ImageSourcePropType;
+  landmark: string;
+  neighborhood: string;
+}
+
+const KOLKATA_HERO_SLIDES: KolkataHeroSlide[] = [
+  {
+    source: require('./assets/kolkata_1.jpg'),
+    landmark: 'Heritage Tramways',
+    neighborhood: 'Esplanade • Kolkata',
+  },
+  {
+    source: require('./assets/kolkata_2.jpg'),
+    landmark: 'Vidyasagar Setu',
+    neighborhood: 'Hooghly River • Kolkata',
+  },
+  {
+    source: require('./assets/kolkata_3.jpg'),
+    landmark: 'Victoria Memorial',
+    neighborhood: 'Twilight Reflections • Kolkata',
+  },
+  {
+    source: require('./assets/kolkata_4.jpg'),
+    landmark: 'Victoria Memorial',
+    neighborhood: 'Heritage Grounds • Kolkata',
+  },
+  {
+    source: require('./assets/kolkata_5.jpg'),
+    landmark: 'Howrah Bridge',
+    neighborhood: 'Rabindra Setu • Kolkata',
+  },
+  {
+    source: require('./assets/kolkata_6.jpg'),
+    landmark: 'Iconic Yellow Cabs',
+    neighborhood: 'City of Joy • Kolkata',
+  },
 ];
 
-const preloadCarouselImage = (url: string) => {
-  if (!url) return;
-  try {
-    if (Image.prefetch) {
-      Image.prefetch(url).catch(() => {});
-    }
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as unknown as { Image?: new () => HTMLImageElement }).Image) {
-      const img = new (window as unknown as { Image: new () => HTMLImageElement }).Image();
-      img.src = url;
-    }
-  } catch {
-    // Ignore prefetch errors
-  }
-};
-
-const getValidImagesList = (failedSet: Set<string>) =>
-  KOLKATA_BACKGROUND_IMAGES.filter((url) => !failedSet.has(url));
-
-function HomeBackgroundCarousel() {
-  const failedUrlsRef = useRef<Set<string>>(new Set());
-  const [, setFailedCount] = useState(0);
-
+function KolkataHeroBanner() {
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A');
-  const currentImageIndexRef = useRef(0);
-  const [cycleCount, setCycleCount] = useState(0);
-
-  const [slotAUri, setSlotAUri] = useState(KOLKATA_BACKGROUND_IMAGES[0]);
-  const [slotBUri, setSlotBUri] = useState(KOLKATA_BACKGROUND_IMAGES[1]);
+  const [slotAIndex, setSlotAIndex] = useState(0);
+  const [slotBIndex, setSlotBIndex] = useState(1);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   const opacityA = useRef(new Animated.Value(1)).current;
   const opacityB = useRef(new Animated.Value(0)).current;
+  const scaleA = useRef(new Animated.Value(1)).current;
+  const scaleB = useRef(new Animated.Value(1)).current;
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const isTransitioningRef = useRef(false);
+  const currentIndexRef = useRef(0);
+  currentIndexRef.current = currentIndex;
 
-  // Preload all images on mount and cleanup on unmount
+  const activeSlotRef = useRef<'A' | 'B'>('A');
+  activeSlotRef.current = activeSlot;
+
   useEffect(() => {
     isMountedRef.current = true;
-    KOLKATA_BACKGROUND_IMAGES.forEach((url) => {
-      preloadCarouselImage(url);
-    });
-
     return () => {
       isMountedRef.current = false;
       if (timerRef.current) {
@@ -162,78 +172,93 @@ function HomeBackgroundCarousel() {
       }
       opacityA.stopAnimation();
       opacityB.stopAnimation();
+      scaleA.stopAnimation();
+      scaleB.stopAnimation();
     };
-  }, [opacityA, opacityB]);
+  }, [opacityA, opacityB, scaleA, scaleB]);
 
-  // Main 5-second carousel timer and cross-fade transition
-  useEffect(() => {
-    const validList = getValidImagesList(failedUrlsRef.current);
-    if (validList.length <= 1) return;
+  const goToSlide = (nextIndex: number) => {
+    if (!isMountedRef.current || isTransitioningRef.current) return;
+    if (nextIndex === currentIndexRef.current) return;
 
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
+    isTransitioningRef.current = true;
+    const curSlot = activeSlotRef.current;
+
+    if (curSlot === 'A') {
+      setSlotBIndex(nextIndex);
+      opacityB.setValue(0);
+      scaleB.setValue(1.03);
+
+      Animated.parallel([
+        Animated.timing(opacityB, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(opacityA, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(scaleB, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start((result) => {
+        if (!isMountedRef.current) return;
+        if (result.finished) {
+          setActiveSlot('B');
+          setCurrentIndex(nextIndex);
+          isTransitioningRef.current = false;
+        }
+      });
+    } else {
+      setSlotAIndex(nextIndex);
+      opacityA.setValue(0);
+      scaleA.setValue(1.03);
+
+      Animated.parallel([
+        Animated.timing(opacityA, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(opacityB, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(scaleA, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start((result) => {
+        if (!isMountedRef.current) return;
+        if (result.finished) {
+          setActiveSlot('A');
+          setCurrentIndex(nextIndex);
+          isTransitioningRef.current = false;
+        }
+      });
     }
+  };
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
       if (!isMountedRef.current || isTransitioningRef.current) return;
-
-      const currentList = getValidImagesList(failedUrlsRef.current);
-      if (currentList.length <= 1) return;
-
-      const nextIndex = (currentImageIndexRef.current + 1) % currentList.length;
-      const nextUri = currentList[nextIndex];
-      isTransitioningRef.current = true;
-
-      if (activeSlot === 'A') {
-        setSlotBUri(nextUri);
-        opacityB.setValue(0);
-
-        Animated.timing(opacityB, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: Platform.OS !== 'web',
-        }).start((result) => {
-          if (!isMountedRef.current) return;
-          if (result.finished) {
-            opacityA.setValue(0);
-            setActiveSlot('B');
-            currentImageIndexRef.current = nextIndex;
-
-            const afterNextIdx = (nextIndex + 1) % currentList.length;
-            const afterNextUri = currentList[afterNextIdx];
-            setSlotAUri(afterNextUri);
-            preloadCarouselImage(currentList[(afterNextIdx + 1) % currentList.length]);
-
-            isTransitioningRef.current = false;
-            setCycleCount((c) => c + 1);
-          }
-        });
-      } else {
-        setSlotAUri(nextUri);
-        opacityA.setValue(0);
-
-        Animated.timing(opacityA, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: Platform.OS !== 'web',
-        }).start((result) => {
-          if (!isMountedRef.current) return;
-          if (result.finished) {
-            opacityB.setValue(0);
-            setActiveSlot('A');
-            currentImageIndexRef.current = nextIndex;
-
-            const afterNextIdx = (nextIndex + 1) % currentList.length;
-            const afterNextUri = currentList[afterNextIdx];
-            setSlotBUri(afterNextUri);
-            preloadCarouselImage(currentList[(afterNextIdx + 1) % currentList.length]);
-
-            isTransitioningRef.current = false;
-            setCycleCount((c) => c + 1);
-          }
-        });
-      }
-    }, 5000);
+      const next = (currentIndexRef.current + 1) % KOLKATA_HERO_SLIDES.length;
+      goToSlide(next);
+    }, 5500);
 
     return () => {
       if (timerRef.current) {
@@ -241,100 +266,105 @@ function HomeBackgroundCarousel() {
         timerRef.current = null;
       }
     };
-  }, [activeSlot, cycleCount, opacityA, opacityB]);
+  }, [currentIndex, activeSlot]);
 
-  const handleImageError = (slot: 'A' | 'B', failedUri: string) => {
-    if (!isMountedRef.current || !failedUri) return;
-    if (failedUrlsRef.current.has(failedUri)) return;
-
-    failedUrlsRef.current.add(failedUri);
-    setFailedCount((c) => c + 1);
-
-    const validList = getValidImagesList(failedUrlsRef.current);
-    if (validList.length === 0) return;
-
-    if (isTransitioningRef.current) {
-      opacityA.stopAnimation();
-      opacityB.stopAnimation();
-      isTransitioningRef.current = false;
-    }
-
-    if (slot === 'A') {
-      if (activeSlot === 'A') {
-        if (validList.length > 1) {
-          opacityA.setValue(0);
-          opacityB.setValue(1);
-          setActiveSlot('B');
-          currentImageIndexRef.current = 1 % validList.length;
-          const afterNext = (currentImageIndexRef.current + 1) % validList.length;
-          setSlotAUri(validList[afterNext]);
-          setCycleCount((c) => c + 1);
-        } else {
-          setSlotAUri(validList[0]);
-        }
-      } else {
-        const nextIdx = (currentImageIndexRef.current + 1) % validList.length;
-        setSlotAUri(validList[nextIdx]);
-      }
-    } else {
-      if (activeSlot === 'B') {
-        if (validList.length > 1) {
-          opacityB.setValue(0);
-          opacityA.setValue(1);
-          setActiveSlot('A');
-          currentImageIndexRef.current = 0;
-          const afterNext = (currentImageIndexRef.current + 1) % validList.length;
-          setSlotBUri(validList[afterNext]);
-          setCycleCount((c) => c + 1);
-        } else {
-          setSlotBUri(validList[0]);
-        }
-      } else {
-        const nextIdx = (currentImageIndexRef.current + 1) % validList.length;
-        setSlotBUri(validList[nextIdx]);
-      }
-    }
+  const handleDotPress = (idx: number) => {
+    if (idx === currentIndex || isTransitioningRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    goToSlide(idx);
   };
 
+  const currentSlide = KOLKATA_HERO_SLIDES[currentIndex] || KOLKATA_HERO_SLIDES[0];
+
   return (
-    <View style={styles.carouselContainer} pointerEvents="none">
-      {slotAUri ? (
+    <View style={styles.heroCard}>
+      <View style={styles.heroCarouselContainer} pointerEvents="none">
         <Animated.View
           style={[
-            styles.carouselSlide,
+            styles.heroCarouselSlide,
             {
               opacity: opacityA,
-              zIndex: activeSlot === 'A' ? 1 : 2,
+              transform: [{ scale: scaleA }],
+              zIndex: activeSlot === 'A' ? 2 : 1,
             },
           ]}
         >
           <Image
-            source={{ uri: slotAUri }}
+            source={KOLKATA_HERO_SLIDES[slotAIndex].source}
             resizeMode="cover"
-            style={styles.carouselImage}
-            onError={() => handleImageError('A', slotAUri)}
+            style={styles.heroCarouselImage}
           />
         </Animated.View>
-      ) : null}
-      {slotBUri ? (
+
         <Animated.View
           style={[
-            styles.carouselSlide,
+            styles.heroCarouselSlide,
             {
               opacity: opacityB,
-              zIndex: activeSlot === 'B' ? 1 : 2,
+              transform: [{ scale: scaleB }],
+              zIndex: activeSlot === 'B' ? 2 : 1,
             },
           ]}
         >
           <Image
-            source={{ uri: slotBUri }}
+            source={KOLKATA_HERO_SLIDES[slotBIndex].source}
             resizeMode="cover"
-            style={styles.carouselImage}
-            onError={() => handleImageError('B', slotBUri)}
+            style={styles.heroCarouselImage}
           />
         </Animated.View>
-      ) : null}
-      <View style={styles.carouselOverlay} />
+
+        <LinearGradient
+          colors={[
+            'rgba(15, 23, 42, 0.45)',
+            'rgba(15, 23, 42, 0.05)',
+            'rgba(15, 23, 42, 0.35)',
+            'rgba(10, 15, 30, 0.88)',
+          ]}
+          locations={[0, 0.32, 0.65, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
+
+      <View style={styles.heroContent} pointerEvents="box-none">
+        <View style={styles.locationBadge}>
+          <View style={styles.locationBadgeIcon}>
+            <MaterialCommunityIcons name="map-marker-radius" size={13} color="#ffffff" />
+          </View>
+          <Text style={styles.locationLandmarkText} numberOfLines={1}>
+            {currentSlide.landmark}
+          </Text>
+          <Text style={styles.locationDividerText}>•</Text>
+          <Text style={styles.locationSubText} numberOfLines={1}>
+            {currentSlide.neighborhood}
+          </Text>
+        </View>
+
+        <Text style={styles.heroTitle}>Every drop can save a life</Text>
+        <Text style={styles.heroSubtitle}>Kolkata, let&apos;s help each other.</Text>
+
+        <View style={styles.carouselIndicatorsCapsule}>
+          {KOLKATA_HERO_SLIDES.map((slide, idx) => {
+            const isActive = idx === currentIndex;
+            return (
+              <Pressable
+                key={idx}
+                onPress={() => handleDotPress(idx)}
+                style={styles.carouselDotTouch}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${slide.landmark}`}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              >
+                <View
+                  style={[
+                    styles.carouselDot,
+                    isActive && styles.carouselDotActive,
+                  ]}
+                />
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
     </View>
   );
 }
@@ -382,7 +412,6 @@ function HomeScreen({
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
-      <HomeBackgroundCarousel />
 
       <View style={styles.headerWrap}>
         <View style={styles.header}>
@@ -414,17 +443,7 @@ function HomeScreen({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <View style={styles.heroContent}>
-            <View style={styles.locationBadge}>
-              <MaterialCommunityIcons name="map-marker-outline" size={16} color="#ffffff" />
-              <Text style={styles.locationText}>Kolkata, West Bengal</Text>
-            </View>
-
-            <Text style={styles.heroTitle}>Every drop can save a life</Text>
-            <Text style={styles.heroSubtitle}>Kolkata, let&apos;s help each other.</Text>
-          </View>
-        </View>
+        <KolkataHeroBanner />
 
         <View style={styles.alertCard}>
           <View style={styles.alertHeader}>
@@ -3085,38 +3104,20 @@ function RequestBloodScreen({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f7f9fb',
+    backgroundColor: '#ffffff',
   },
-  carouselContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#0f172a',
+  heroCarouselContainer: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 24,
     overflow: 'hidden',
+    backgroundColor: '#0f172a',
   },
-  carouselSlide: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  heroCarouselSlide: {
+    ...StyleSheet.absoluteFill,
+  },
+  heroCarouselImage: {
     width: '100%',
     height: '100%',
-  },
-  carouselImage: {
-    width: '100%',
-    height: '100%',
-  },
-  carouselOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    zIndex: 3,
   },
   authLoadingText: {
     color: '#59413e',
@@ -3132,7 +3133,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 10,
-    backgroundColor: 'rgba(247, 249, 251, 0.8)',
+    backgroundColor: '#ffffff',
     paddingTop: 12,
     paddingBottom: 8,
   },
@@ -3202,65 +3203,126 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     position: 'relative',
-    height: 260,
+    height: 284,
     borderRadius: 24,
     overflow: 'hidden',
     marginBottom: 18,
-    backgroundColor: '#b02d29',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
+    elevation: 8,
   },
   heroContent: {
     position: 'absolute',
     left: 0,
     right: 0,
+    top: 0,
     bottom: 0,
     padding: 20,
+    paddingBottom: 40,
+    justifyContent: 'flex-end',
+    zIndex: 4,
   },
   locationBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 'auto',
   },
-  locationText: {
+  locationBadgeIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ba1a1a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationLandmarkText: {
     color: '#ffffff',
     fontSize: 12,
-    lineHeight: 16,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  locationDividerText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 11,
+  },
+  locationSubText: {
+    color: 'rgba(255, 255, 255, 0.90)',
+    fontSize: 11,
     fontWeight: '500',
   },
   heroTitle: {
     color: '#ffffff',
-    fontSize: 32,
-    lineHeight: 40,
-    fontWeight: '600',
-    letterSpacing: -0.5,
-    marginBottom: 2,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1.5 },
+    textShadowRadius: 6,
   },
   heroSubtitle: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 16,
-    lineHeight: 24,
+    color: 'rgba(255, 255, 255, 0.92)',
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: '400',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  carouselIndicatorsCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  carouselDotTouch: {
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  carouselDotActive: {
+    width: 22,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ffffff',
   },
   alertCard: {
     backgroundColor: '#ffffff',
     borderRadius: 24,
     padding: 20,
-    marginTop: -34,
+    marginTop: -24,
     marginBottom: 18,
     zIndex: 2,
     shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
@@ -3463,7 +3525,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(247, 249, 251, 0.9)',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingBottom: 12,
