@@ -865,7 +865,8 @@ function FindDonorScreen({
     );
   });
 
-  const visibleMyDonorProfile = myDonorProfile &&
+  const visibleMyDonorProfile =
+    myDonorProfile &&
     myDonorProfile.available &&
     (filterMode === 'exact'
       ? myDonorProfile.blood === selectedBlood
@@ -874,7 +875,9 @@ function FindDonorScreen({
       myDonorProfile.name.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
       myDonorProfile.city.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
       myDonorProfile.area.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      myDonorProfile.blood.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+      myDonorProfile.blood.toLowerCase().includes(searchQuery.toLowerCase().trim()))
+      ? myDonorProfile
+      : null;
 
   const visibleDonorCount = filteredDonors.length + (visibleMyDonorProfile ? 1 : 0);
 
