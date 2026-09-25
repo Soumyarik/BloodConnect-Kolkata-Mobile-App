@@ -19,6 +19,8 @@ as $$
   end;
 $$;
 
+drop function if exists public.get_available_donors(text[], text);
+
 create or replace function public.get_available_donors(
   p_blood_groups text[],
   p_city text default 'Kolkata'
@@ -29,6 +31,7 @@ returns table(
   blood_group text,
   city text,
   area text,
+  phone text,
   donor_available boolean
 )
 language sql
@@ -41,17 +44,27 @@ as $$
     p.blood_group,
     coalesce(p.city, '') as city,
     coalesce(p.area, '') as area,
+    coalesce(p.phone, '') as phone,
     p.donor_available
   from public.profiles p
   where p.id <> auth.uid()
     and p.donor_available = true
-    and p.blood_group = any(p_blood_groups)
+    and (
+      p_blood_groups is null
+      or cardinality(p_blood_groups) = 0
+      or p.blood_group = any(p_blood_groups)
+    )
     and (
       p_city is null
-      or p_city = ''
-      or lower(coalesce(p.city, '')) = lower(p_city)
+      or trim(p_city) = ''
+      or lower(trim(split_part(coalesce(p.city, ''), ',', 1))) =
+         lower(trim(split_part(p_city, ',', 1)))
+      or lower(coalesce(p.city, '')) like '%' || lower(trim(split_part(p_city, ',', 1))) || '%'
     )
-  order by p.area nulls last, p.full_name;
+  order by
+    case when p.phone is not null and p.phone <> '' then 0 else 1 end,
+    p.area nulls last,
+    p.full_name;
 $$;
 
 create or replace function public.send_donor_request(
