@@ -110,6 +110,120 @@ interface KolkataHeroSlide {
   neighborhood: string;
 }
 
+function BloodDropLoader() {
+  const dropTranslate = useRef(new Animated.Value(0)).current;
+  const dropScale = useRef(new Animated.Value(0.92)).current;
+  const haloScale = useRef(new Animated.Value(0.84)).current;
+  const haloOpacity = useRef(new Animated.Value(0.24)).current;
+  const smallDropTranslate = useRef(new Animated.Value(0)).current;
+  const smallDropOpacity = useRef(new Animated.Value(0.25)).current;
+
+  useEffect(() => {
+    const animationConfig = {
+      useNativeDriver: Platform.OS !== 'web',
+    };
+
+    const dropLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(dropTranslate, { toValue: -10, duration: 650, easing: Easing.out(Easing.cubic), ...animationConfig }),
+          Animated.timing(dropScale, { toValue: 1.04, duration: 650, easing: Easing.out(Easing.cubic), ...animationConfig }),
+        ]),
+        Animated.parallel([
+          Animated.timing(dropTranslate, { toValue: 0, duration: 650, easing: Easing.inOut(Easing.cubic), ...animationConfig }),
+          Animated.timing(dropScale, { toValue: 0.96, duration: 650, easing: Easing.inOut(Easing.cubic), ...animationConfig }),
+        ]),
+      ]),
+    );
+
+    const haloLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(haloScale, { toValue: 1.22, duration: 900, easing: Easing.out(Easing.quad), ...animationConfig }),
+          Animated.timing(haloOpacity, { toValue: 0, duration: 900, easing: Easing.out(Easing.quad), ...animationConfig }),
+        ]),
+        Animated.parallel([
+          Animated.timing(haloScale, { toValue: 0.84, duration: 0, ...animationConfig }),
+          Animated.timing(haloOpacity, { toValue: 0.24, duration: 0, ...animationConfig }),
+        ]),
+      ]),
+    );
+
+    const smallDropLoop = Animated.loop(
+      Animated.sequence([
+        Animated.delay(280),
+        Animated.parallel([
+          Animated.timing(smallDropTranslate, { toValue: 22, duration: 900, easing: Easing.in(Easing.quad), ...animationConfig }),
+          Animated.timing(smallDropOpacity, { toValue: 0, duration: 900, easing: Easing.in(Easing.quad), ...animationConfig }),
+        ]),
+        Animated.parallel([
+          Animated.timing(smallDropTranslate, { toValue: 0, duration: 0, ...animationConfig }),
+          Animated.timing(smallDropOpacity, { toValue: 0.25, duration: 0, ...animationConfig }),
+        ]),
+      ]),
+    );
+
+    dropLoop.start();
+    haloLoop.start();
+    smallDropLoop.start();
+
+    return () => {
+      dropLoop.stop();
+      haloLoop.stop();
+      smallDropLoop.stop();
+    };
+  }, [dropTranslate, dropScale, haloScale, haloOpacity, smallDropTranslate, smallDropOpacity]);
+
+  return (
+    <View style={styles.loaderScreen} accessibilityLabel="Loading BloodConnect">
+      <View style={styles.loaderOrb}>
+        <Animated.View
+          style={[
+            styles.loaderHalo,
+            {
+              opacity: haloOpacity,
+              transform: [{ scale: haloScale }],
+            },
+          ]}
+        />
+
+        <Animated.View
+          style={[
+            styles.loaderDrop,
+            {
+              transform: [{ translateY: dropTranslate }, { scale: dropScale }],
+            },
+          ]}
+        >
+          <MaterialCommunityIcons name="water" size={68} color="#760009" />
+        </Animated.View>
+
+        <Animated.View
+          style={[
+            styles.loaderSmallDrop,
+            {
+              opacity: smallDropOpacity,
+              transform: [{ translateY: smallDropTranslate }],
+            },
+          ]}
+        >
+          <MaterialCommunityIcons name="water" size={16} color="#ba1a1a" />
+        </Animated.View>
+      </View>
+
+      <Text style={styles.loaderBrand}>BloodConnect</Text>
+      <Text style={styles.loaderTitle}>Every drop can save a life</Text>
+      <Text style={styles.loaderSubtitle}>Connecting Kolkata, one drop at a time</Text>
+
+      <View style={styles.loaderDotsRow} accessibilityElementsHidden>
+        <View style={styles.loaderDot} />
+        <View style={styles.loaderDot} />
+        <View style={styles.loaderDot} />
+      </View>
+    </View>
+  );
+}
+
 const KOLKATA_HERO_SLIDES: KolkataHeroSlide[] = [
   {
     source: require('./assets/kolkata_1.jpg'),
@@ -3531,6 +3645,83 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  loaderScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff8f7',
+    paddingHorizontal: 24,
+  },
+  loaderOrb: {
+    width: 156,
+    height: 156,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    marginBottom: 18,
+  },
+  loaderHalo: {
+    position: 'absolute',
+    width: 122,
+    height: 122,
+    borderRadius: 61,
+    backgroundColor: '#ffdad6',
+    borderWidth: 1,
+    borderColor: '#f0b9b3',
+  },
+  loaderDrop: {
+    width: 96,
+    height: 96,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    shadowColor: '#760009',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 7,
+    zIndex: 2,
+  },
+  loaderSmallDrop: {
+    position: 'absolute',
+    top: 10,
+    right: 17,
+    zIndex: 3,
+  },
+  loaderBrand: {
+    color: '#760009',
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  loaderTitle: {
+    color: '#191c1e',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  loaderSubtitle: {
+    color: '#59413e',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  loaderDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 18,
+  },
+  loaderDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#760009',
+  },
   authLoadingText: {
     color: '#59413e',
     fontSize: 16,
@@ -5457,11 +5648,7 @@ function AppContent() {
   }, [session?.user.id]);
 
   if (loading) {
-    return (
-      <View style={styles.screen}>
-        <Text style={styles.authLoadingText}>Loading BloodConnect...</Text>
-      </View>
-    );
+    return <BloodDropLoader />;
   }
 
   if (!session) {
