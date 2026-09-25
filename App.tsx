@@ -112,7 +112,7 @@ interface KolkataHeroSlide {
   neighborhood: string;
 }
 
-function BloodDropLoader() {
+function BloodDropLoader({ compact = false }: { compact?: boolean }) {
   const dropTranslate = useRef(new Animated.Value(0)).current;
   const dropScale = useRef(new Animated.Value(0.92)).current;
   const haloScale = useRef(new Animated.Value(0.84)).current;
@@ -213,15 +213,27 @@ function BloodDropLoader() {
         </Animated.View>
       </View>
 
-      <Text style={styles.loaderBrand}>BloodConnect</Text>
-      <Text style={styles.loaderTitle}>Every drop can save a life</Text>
-      <Text style={styles.loaderSubtitle}>Connecting Kolkata, one drop at a time</Text>
+      {!compact ? (
+        <>
+          <Text style={styles.loaderBrand}>BloodConnect</Text>
+          <Text style={styles.loaderTitle}>Every drop can save a life</Text>
+          <Text style={styles.loaderSubtitle}>Connecting Kolkata, one drop at a time</Text>
 
-      <View style={styles.loaderDotsRow} accessibilityElementsHidden>
-        <View style={styles.loaderDot} />
-        <View style={styles.loaderDot} />
-        <View style={styles.loaderDot} />
-      </View>
+          <View style={styles.loaderDotsRow} accessibilityElementsHidden>
+            <View style={styles.loaderDot} />
+            <View style={styles.loaderDot} />
+            <View style={styles.loaderDot} />
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function BloodDropTransitionOverlay() {
+  return (
+    <View style={styles.transitionOverlay} pointerEvents="auto" accessibilityLabel="Loading">
+      <BloodDropLoader compact />
     </View>
   );
 }
@@ -4383,6 +4395,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  appScreenLayer: {
+    flex: 1,
+  },
+  transitionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+    backgroundColor: '#fff8f7',
+  },
   loaderScreen: {
     flex: 1,
     alignItems: 'center',
@@ -6636,28 +6656,53 @@ const styles = StyleSheet.create({
   requestCardHint: { color: '#760009', fontSize: 11, lineHeight: 16, fontWeight: '600', marginTop: 12 },
 });
 
+type AppScreen = 'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor' | 'notifications';
+
 function AppContent() {
   const { session, loading, signIn, signUp, signOut } = useAuth();
-  const [screen, setScreen] = useState<'home' | 'request' | 'requests' | 'requestDetails' | 'profile' | 'findDonor' | 'notifications'>('home');
+  const [screen, setScreen] = useState<AppScreen>('home');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [requestDetailsReturnScreen, setRequestDetailsReturnScreen] = useState<'requests' | 'notifications' | 'profile'>('requests');
   const [findDonorReturnScreen, setFindDonorReturnScreen] = useState<'home' | 'requestDetails'>('home');
   const [notificationsReturnScreen, setNotificationsReturnScreen] = useState<'home' | 'profile'>('home');
-  const goHome = () => { setSelectedRequestId(null); setScreen('home'); };
-  const goFindDonor = () => { setSelectedRequestId(null); setFindDonorReturnScreen('home'); setScreen('findDonor'); };
-  const goRequests = () => { setSelectedRequestId(null); setScreen('requests'); };
-  const goProfile = () => { setSelectedRequestId(null); setScreen('profile'); };
+  const switchScreen = (nextScreen: AppScreen) => {
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+
+    setIsTransitioning(true);
+    setScreen(nextScreen);
+
+    transitionTimerRef.current = setTimeout(() => {
+      setIsTransitioning(false);
+      transitionTimerRef.current = null;
+    }, 620);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    };
+  }, []);
+
+  const goHome = () => { setSelectedRequestId(null); switchScreen('home'); };
+  const goFindDonor = () => { setSelectedRequestId(null); setFindDonorReturnScreen('home'); switchScreen('findDonor'); };
+  const goRequests = () => { setSelectedRequestId(null); switchScreen('requests'); };
+  const goProfile = () => { setSelectedRequestId(null); switchScreen('profile'); };
   const openFindDonorFromHome = () => {
     setSelectedRequestId(null);
     setFindDonorReturnScreen('home');
-    setScreen('findDonor');
+    switchScreen('findDonor');
   };
-  const openFindDonorFromDetails = () => { setFindDonorReturnScreen('requestDetails'); setScreen('findDonor'); };
-  const openNotifications = (source: 'home' | 'profile') => { setNotificationsReturnScreen(source); setScreen('notifications'); };
+  const openFindDonorFromDetails = () => { setFindDonorReturnScreen('requestDetails'); switchScreen('findDonor'); };
+  const openNotifications = (source: 'home' | 'profile') => { setNotificationsReturnScreen(source); switchScreen('notifications'); };
   const openRequestDetails = (requestId: string, source: 'requests' | 'notifications' | 'profile') => {
     setRequestDetailsReturnScreen(source);
     setSelectedRequestId(requestId);
-    setScreen('requestDetails');
+    switchScreen('requestDetails');
   };
 
   useEffect(() => {
@@ -6712,93 +6757,76 @@ function AppContent() {
     return <AuthScreen signIn={signIn} signUp={signUp} />;
   }
 
-  if (screen === 'home') {
-    return (
-      <HomeScreen
-        onRequestBlood={() => setScreen('request')}
-        onFindDonor={goFindDonor}
-        onRequests={goRequests}
-        onProfile={goProfile}
-        onNotifications={() => openNotifications('home')}
-      />
-    );
-  }
-
-  if (screen === 'notifications') {
-    return (
-      <NotificationsScreen
-        onBack={() => setScreen(notificationsReturnScreen)}
-        onHome={goHome}
-        onRequests={goRequests}
-        onProfile={goProfile}
-        onOpenRequest={(requestId) => openRequestDetails(requestId, 'notifications')}
-      />
-    );
-  }
-
-  if (screen === 'request') {
-    return (
-      <RequestBloodScreen
-        onBack={goHome}
-        onHome={goHome}
-        onFindDonor={goFindDonor}
-        onRequests={goRequests}
-        onProfile={goProfile}
-      />
-    );
-  }
-
-  if (screen === 'requests') {
-    return (
-      <RequestsScreen
-        onHome={goHome}
-        onFindDonor={goFindDonor}
-        onProfile={goProfile}
-        onRequestDetails={(requestId) => openRequestDetails(requestId, 'requests')}
-      />
-    );
-  }
-
-  if (screen === 'requestDetails') {
-    return (
-      <BloodRequestDetailsScreen
-        onBack={() => setScreen(requestDetailsReturnScreen)}
-        onHome={goHome}
-        onFindDonor={openFindDonorFromDetails}
-        onRequests={goRequests}
-        onProfile={goProfile}
-        requestId={selectedRequestId || ''}
-      />
-    );
-  }
-
-  if (screen === 'findDonor') {
-    return (
-      <FindDonorScreen
-        onBack={() => setScreen(findDonorReturnScreen)}
-        onHome={goHome}
-        onFindDonor={goFindDonor}
-        onRequests={goRequests}
-        onProfile={goProfile}
-        onRequestBlood={() => setScreen('request')}
-        requestId={selectedRequestId}
-      />
-    );
-  }
-
   return (
-    <ProfileScreen
-      onHome={goHome}
-      onFindDonor={goFindDonor}
-      onRequests={goRequests}
-      onNotifications={() => openNotifications('profile')}
-      onOpenRequest={(requestId) => openRequestDetails(requestId, 'profile')}
-      onSignOut={async () => {
-        const result = await signOut();
-        if (result.error) throw result.error;
-        setScreen('home');
-      }}
-    />
+    <>
+      <View style={styles.appScreenLayer}>
+        {screen === 'home' ? (
+          <HomeScreen
+            onRequestBlood={() => switchScreen('request')}
+            onFindDonor={goFindDonor}
+            onRequests={goRequests}
+            onProfile={goProfile}
+            onNotifications={() => openNotifications('home')}
+          />
+        ) : screen === 'notifications' ? (
+          <NotificationsScreen
+            onBack={() => switchScreen(notificationsReturnScreen)}
+            onHome={goHome}
+            onRequests={goRequests}
+            onProfile={goProfile}
+            onOpenRequest={(requestId) => openRequestDetails(requestId, 'notifications')}
+          />
+        ) : screen === 'request' ? (
+          <RequestBloodScreen
+            onBack={goHome}
+            onHome={goHome}
+            onFindDonor={goFindDonor}
+            onRequests={goRequests}
+            onProfile={goProfile}
+          />
+        ) : screen === 'requests' ? (
+          <RequestsScreen
+            onHome={goHome}
+            onFindDonor={goFindDonor}
+            onProfile={goProfile}
+            onRequestDetails={(requestId) => openRequestDetails(requestId, 'requests')}
+          />
+        ) : screen === 'requestDetails' ? (
+          <BloodRequestDetailsScreen
+            onBack={() => switchScreen(requestDetailsReturnScreen)}
+            onHome={goHome}
+            onFindDonor={openFindDonorFromDetails}
+            onRequests={goRequests}
+            onProfile={goProfile}
+            requestId={selectedRequestId || ''}
+          />
+        ) : screen === 'findDonor' ? (
+          <FindDonorScreen
+            onBack={() => switchScreen(findDonorReturnScreen)}
+            onHome={goHome}
+            onFindDonor={goFindDonor}
+            onRequests={goRequests}
+            onProfile={goProfile}
+            onRequestBlood={() => switchScreen('request')}
+            requestId={selectedRequestId}
+          />
+        ) : (
+          <ProfileScreen
+            onHome={goHome}
+            onFindDonor={goFindDonor}
+            onRequests={goRequests}
+            onNotifications={() => openNotifications('profile')}
+            onOpenRequest={(requestId) => openRequestDetails(requestId, 'profile')}
+            onSignOut={async () => {
+              const result = await signOut();
+              if (result.error) throw result.error;
+              switchScreen('home');
+            }}
+          />
+        )}
+      </View>
+      {isTransitioning ? <BloodDropTransitionOverlay /> : null}
+    </>
   );
 }
 
