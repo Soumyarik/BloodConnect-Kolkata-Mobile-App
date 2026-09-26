@@ -58,7 +58,7 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
       (item) => item.name.toLowerCase() === (initial.state || '').toLowerCase(),
     );
     if (matchingState) {
-      setStateCode(matchingState.iso2 || matchingState.state_code || '');
+      setStateCode(matchingState.state_code || '');
     }
   }, [initial.state]);
 
@@ -304,10 +304,13 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
             <ScrollView style={styles.optionsList} keyboardShouldPersistTaps="handled">
               {filteredOptions.map((item) => {
                 const name = item.name;
-                const code = 'iso2' in item ? (item.iso2 || '') : '';
+                const code =
+                  picker === 'state'
+                    ? String((item as { state_code?: string }).state_code || '')
+                    : '';
                 return (
                   <Pressable
-                    key={name + '-' + (code || item.state_code || 'city')}
+                    key={name + '-' + (code || picker || 'city')}
                     style={styles.optionRow}
                     onPress={() => (picker === 'state' ? selectState(name, code) : selectCity(name))}
                   >
