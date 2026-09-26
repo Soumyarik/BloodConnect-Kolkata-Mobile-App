@@ -3244,6 +3244,7 @@ type ProfileData = {
   bloodGroup: string;
   dateOfBirth: string;
   gender: string;
+  state: string;
   city: string;
   area: string;
   donorAvailable: boolean;
