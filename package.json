@@ -19,7 +19,8 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "^0.21.2",
-    "react-native-svg": "15.15.4"
+    "react-native-svg": "15.15.4",
+    "countries-states-cities-service": "^1.5.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
