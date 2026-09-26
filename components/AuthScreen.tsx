@@ -80,7 +80,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   };
 
   const validatePhone = (value: string) => {
-    const digits = value.replace(/\\D/g, '');
+    const digits = value.replace(/\D/g, '');
     return digits.length === 10 || (digits.length === 12 && digits.startsWith('91'));
   };
 
