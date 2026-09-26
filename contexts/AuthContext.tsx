@@ -17,6 +17,10 @@ type SignUpInput = {
 type ProfileBootstrap = {
   fullName: string;
   bloodGroup: string | null;
+  phone?: string;
+  state?: string;
+  city?: string;
+  donorAvailable?: boolean;
 };
 
 type AuthResult = {
@@ -36,13 +40,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 async function ensureProfile(
   userId: string,
-  profile: ProfileBootstrap,
-  details?: {
-    phone?: string;
-    state?: string;
-    city?: string;
-    donorAvailable?: boolean;
-  }
+  profile: ProfileBootstrap
 ) {
   const { data: existingProfile, error: lookupError } = await supabase
     .from('profiles')
@@ -59,21 +57,23 @@ async function ensureProfile(
     if (!existingProfile.city) {
       updates.city = details?.city || 'Kolkata';
     }
-    if (details?.phone && !existingProfile.phone) {
-      updates.phone = details.phone.trim();
+    if (profile.phone && !existingProfile.phone) {
+      updates.phone = profile.phone.trim();
     }
-    if (details?.state && !existingProfile.state) {
-      updates.state = details.state;
+    if (profile.state && !existingProfile.state) {
+      updates.state = profile.state;
     }
-    if (details?.city && (!existingProfile.city || existingProfile.city === 'Kolkata')) {
-      updates.city = details.city;
+    if (profile.city && (!existingProfile.city || existingProfile.city === 'Kolkata')) {
+      updates.city = profile.city;
     }
-    if (typeof details?.donorAvailable === 'boolean') {
-      updates.donor_available = details.donorAvailable;
+    if (typeof profile.donorAvailable === 'boolean') {
+      updates.donor_available = profile.donorAvailable;
     }
     if (!existingProfile.blood_group && profile.bloodGroup) {
       updates.blood_group = profile.bloodGroup;
-      updates.donor_available = true;
+      if (typeof profile.donorAvailable !== 'boolean') {
+        updates.donor_available = true;
+      }
     }
     if (Object.keys(updates).length > 0) {
       await supabase.from('profiles').update(updates).eq('id', userId);
@@ -85,11 +85,11 @@ async function ensureProfile(
     id: userId,
     full_name: profile.fullName.trim(),
     blood_group: profile.bloodGroup,
-    phone: details?.phone?.trim() || null,
-    state: details?.state || null,
-    city: details?.city || 'Kolkata',
-    donor_available: typeof details?.donorAvailable === 'boolean'
-      ? details.donorAvailable
+    phone: profile.phone?.trim() || null,
+    state: profile.state || null,
+    city: profile.city || 'Kolkata',
+    donor_available: typeof profile.donorAvailable === 'boolean'
+      ? profile.donorAvailable
       : Boolean(profile.bloodGroup),
   });
 
@@ -106,7 +106,16 @@ async function initializeAuthenticatedProfile(): Promise<Error | null> {
   const user = userData.user;
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'BloodConnect User';
   const bloodGroup = user.user_metadata?.blood_group || null;
-  const profileError = await ensureProfile(user.id, { fullName, bloodGroup });
+  const profileError = await ensureProfile(user.id, {
+    fullName,
+    bloodGroup,
+    phone: user.user_metadata?.phone || undefined,
+    state: user.user_metadata?.state || undefined,
+    city: user.user_metadata?.city || undefined,
+    donorAvailable: typeof user.user_metadata?.donor_available === 'boolean'
+      ? user.user_metadata.donor_available
+      : undefined,
+  });
 
   if (profileError) return profileError;
 
@@ -201,7 +210,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error };
     if (!data.user) return { error: new Error('Unable to create the account.') };
 
-    const profileInput = { fullName, bloodGroup: bloodGroup || null };
+    const profileInput = {
+      fullName,
+      bloodGroup: bloodGroup || null,
+      phone,
+      state,
+      city,
+      donorAvailable,
+    };
 
     if (!data.session) {
       return {
@@ -209,12 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const profileError = await ensureProfile(data.user.id, profileInput, {
-    phone,
-    state,
-    city,
-    donorAvailable,
-  });
+    const profileError = await ensureProfile(data.user.id, profileInput);
 
     if (profileError) {
       await supabase.auth.signOut();
