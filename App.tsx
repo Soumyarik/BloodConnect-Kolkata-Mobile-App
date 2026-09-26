@@ -576,7 +576,7 @@ function HomeScreen({
         {
           event: '*',
           schema: 'public',
-          table: 'blood_donor_responses',
+          table: 'donor_responses',
           filter: 'donor_id=eq.' + user?.id,
         },
         () => {
@@ -591,8 +591,13 @@ function HomeScreen({
       }
     });
 
+    const pollInterval = setInterval(() => {
+      if (mounted) void loadUnread();
+    }, 30000);
+
     return () => {
       mounted = false;
+      clearInterval(pollInterval);
       appStateSub.remove();
       void supabase.removeChannel(channel);
     };
@@ -2290,6 +2295,7 @@ function RequestsScreen({
   };
 
   useEffect(() => {
+    let mounted = true;
     void loadRequests();
 
     if (!user?.id) return;
@@ -2304,7 +2310,7 @@ function RequestsScreen({
           table: 'blood_requests',
         },
         () => {
-          void loadRequests();
+          if (mounted) void loadRequests();
         },
       )
       .on(
@@ -2312,21 +2318,38 @@ function RequestsScreen({
         {
           event: '*',
           schema: 'public',
-          table: 'blood_donor_responses',
+          table: 'donor_responses',
         },
         () => {
-          void loadRequests();
+          if (mounted) void loadRequests();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'donation_workflows',
+        },
+        () => {
+          if (mounted) void loadRequests();
         },
       )
       .subscribe();
 
     const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
+      if (nextAppState === 'active' && mounted) {
         void loadRequests();
       }
     });
 
+    const pollInterval = setInterval(() => {
+      if (mounted) void loadRequests();
+    }, 15000);
+
     return () => {
+      mounted = false;
+      clearInterval(pollInterval);
       appStateSub.remove();
       void supabase.removeChannel(channel);
     };
@@ -2773,6 +2796,7 @@ function BloodRequestDetailsScreen({
   };
 
   useEffect(() => {
+    let mounted = true;
     void refreshRequest(true);
 
     if (!requestId) return;
@@ -2788,7 +2812,7 @@ function BloodRequestDetailsScreen({
           filter: 'id=eq.' + requestId,
         },
         () => {
-          void refreshRequest(false);
+          if (mounted) void refreshRequest(false);
         },
       )
       .on(
@@ -2800,18 +2824,36 @@ function BloodRequestDetailsScreen({
           filter: 'request_id=eq.' + requestId,
         },
         () => {
-          void refreshRequest(false);
+          if (mounted) void refreshRequest(false);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'donation_workflows',
+          filter: 'request_id=eq.' + requestId,
+        },
+        () => {
+          if (mounted) void refreshRequest(false);
         },
       )
       .subscribe();
 
     const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
+      if (nextAppState === 'active' && mounted) {
         void refreshRequest(false);
       }
     });
 
+    const pollInterval = setInterval(() => {
+      if (mounted) void refreshRequest(false);
+    }, 10000);
+
     return () => {
+      mounted = false;
+      clearInterval(pollInterval);
       appStateSub.remove();
       void supabase.removeChannel(channel);
     };
@@ -2953,7 +2995,20 @@ function BloodRequestDetailsScreen({
     <View style={styles.detailsScreen}>
       <StatusBar style="dark" />
 
-      <ScrollView ref={detailsScrollRef} style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={detailsScrollRef}
+        style={styles.detailsScroll}
+        contentContainerStyle={styles.detailsContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => void refreshRequest(false)}
+            tintColor="#760009"
+            colors={['#760009']}
+          />
+        }
+      >
         <View style={styles.detailsHeader}>
           <Pressable style={styles.detailsIconButton} onPress={onBack} accessibilityLabel="Go back to requests">
             <MaterialCommunityIcons name="arrow-left" size={22} color="#191c1e" />
@@ -4097,6 +4152,22 @@ function RequestBloodScreen({
   const [scheduleTimeDraft, setScheduleTimeDraft] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  useEffect(() => {
+    if (!user?.id) return;
+    void supabase
+      .from('profiles')
+      .select('phone')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.phone) {
+          const rawDigits = data.phone.replace(/\D/g, '');
+          const tenDigits = rawDigits.length === 12 && rawDigits.startsWith('91') ? rawDigits.slice(2) : rawDigits;
+          setPhone((current) => current || tenDigits);
+        }
+      });
+  }, [user?.id]);
+
   const fillCurrentLocation = async () => {
     setErrorMessage('');
     try {
@@ -4128,9 +4199,9 @@ function RequestBloodScreen({
         setLocation(label);
         showMessage('Location added', 'The approximate current area has been added to the hospital/location field. Verify that it is the hospital location before submitting.');
       } else {
-        const currentLocation = location.trim();
+        const currentLocation = location.trim() || 'Detected GPS Area (' + latitude.toFixed(3) + ', ' + longitude.toFixed(3) + ')';
         setLocation(currentLocation);
-        showMessage('Address lookup unavailable', 'Your location was detected, but this platform could not convert it to an address. Enter the hospital area or full address manually.');
+        showMessage('GPS coordinates detected', 'Your coordinates were captured. Please verify or update the hospital name and address.');
       }
     } catch (error) {
       showMessage('Unable to get location', error instanceof Error ? error.message : 'Please try again.');

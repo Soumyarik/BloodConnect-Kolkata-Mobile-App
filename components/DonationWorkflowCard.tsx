@@ -134,6 +134,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   }, [requestId, userId]);
 
   useEffect(() => {
+    let mounted = true;
     const initialLoad = setTimeout(() => {
       void refresh(true);
     }, 0);
@@ -145,11 +146,11 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
         {
           event: '*',
           schema: 'public',
-          table: 'blood_donor_responses',
+          table: 'donation_workflows',
           filter: 'request_id=eq.' + requestId,
         },
         () => {
-          void refresh(false);
+          if (mounted) void refresh(false);
         },
       )
       .on(
@@ -157,23 +158,30 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
         {
           event: '*',
           schema: 'public',
-          table: 'donation_events',
+          table: 'donor_responses',
           filter: 'request_id=eq.' + requestId,
         },
         () => {
-          void refresh(false);
+          if (mounted) void refresh(false);
         },
       )
       .subscribe();
 
     const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
+      if (nextAppState === 'active' && mounted) {
         void refresh(false);
       }
     });
 
+    // Fallback polling interval every 10 seconds to recover gracefully if realtime drops
+    const pollInterval = setInterval(() => {
+      if (mounted) void refresh(false);
+    }, 10000);
+
     return () => {
+      mounted = false;
       clearTimeout(initialLoad);
+      clearInterval(pollInterval);
       appStateSub.remove();
       void supabase.removeChannel(channel);
     };
@@ -304,6 +312,14 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
                 One accepted donor can be selected for the live donation workflow.
               </Text>
             </View>
+            <Pressable
+              style={workflowStyles.refreshIconButton}
+              onPress={() => void refresh(false)}
+              hitSlop={8}
+              accessibilityLabel="Refresh accepted donors"
+            >
+              <MaterialCommunityIcons name="refresh" size={16} color="#760009" />
+            </Pressable>
           </View>
 
           {acceptedResponses.map((response, index) => (
@@ -351,6 +367,14 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
                   You accepted this blood request. The requester must select a donor before the post-acceptance workflow starts.
                 </Text>
               </View>
+              <Pressable
+                style={workflowStyles.refreshIconButton}
+                onPress={() => void refresh(false)}
+                hitSlop={8}
+                accessibilityLabel="Refresh workflow status"
+              >
+                <MaterialCommunityIcons name="refresh" size={16} color="#760009" />
+              </Pressable>
             </View>
             {errorMessage ? <Text style={workflowStyles.error}>{errorMessage}</Text> : null}
           </View>
@@ -374,6 +398,14 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
           <Text style={workflowStyles.subtitle}>{meta?.title}</Text>
         </View>
         <Text style={workflowStyles.stepText}>{stageIndex(currentStage as WorkflowStage) + 1}/{orderedStages.length}</Text>
+        <Pressable
+          style={workflowStyles.refreshIconButton}
+          onPress={() => void refresh(false)}
+          hitSlop={8}
+          accessibilityLabel="Refresh donation workflow status"
+        >
+          <MaterialCommunityIcons name="refresh" size={16} color="#760009" />
+        </Pressable>
       </View>
 
       <View style={workflowStyles.progressTrack}>
@@ -499,6 +531,14 @@ const workflowStyles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '800',
+  },
+  refreshIconButton: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#fff0ee',
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressTrack: {
     height: 8,
