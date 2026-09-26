@@ -6921,6 +6921,14 @@ function AppContent() {
   const [notificationsReturnScreen, setNotificationsReturnScreen] = useState<'home' | 'profile'>('home');
   const [profileSetupChecking, setProfileSetupChecking] = useState(false);
   const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
+  const [profileSetupInitial, setProfileSetupInitial] = useState<{
+    fullName?: string;
+    phone?: string;
+    state?: string;
+    city?: string;
+    bloodGroup?: string;
+    donorAvailable?: boolean;
+  }>({});
   const switchScreen = (nextScreen: AppScreen) => {
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
@@ -6977,6 +6985,18 @@ function AppContent() {
         data?.city?.trim() &&
         data?.blood_group?.trim()
       );
+
+      if (!complete) {
+        setProfileSetupInitial({
+          fullName: data?.full_name || session.user.user_metadata?.full_name || '',
+          phone: data?.phone || '',
+          state: data?.state || '',
+          city: data?.city || '',
+          bloodGroup: data?.blood_group || session.user.user_metadata?.blood_group || '',
+        });
+      } else {
+        setProfileSetupInitial({});
+      }
 
       setNeedsProfileSetup(!complete);
       setProfileSetupChecking(false);
@@ -7105,7 +7125,7 @@ function AppContent() {
   if (needsProfileSetup) {
     return (
       <ProfileSetupScreen
-        initial={{}}
+        initial={profileSetupInitial}
         onSave={async (input) => {
           const { error } = await supabase
             .from('profiles')
