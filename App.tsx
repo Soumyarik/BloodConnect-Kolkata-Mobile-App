@@ -33,6 +33,7 @@ import * as Notifications from 'expo-notifications';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 import { BloodConnectLogo } from './components/BloodConnectLogo';
 import { NotificationsScreen } from './components/NotificationsScreen';
+import { ProfileSetupScreen } from './components/ProfileSetupScreen';
 import { openAppSettings, openExternalUrl, showMessage } from './utils/interaction';
 
 if (Platform.OS !== 'web') {
@@ -6918,6 +6919,8 @@ function AppContent() {
   const [requestDetailsReturnScreen, setRequestDetailsReturnScreen] = useState<'requests' | 'notifications' | 'profile'>('requests');
   const [findDonorReturnScreen, setFindDonorReturnScreen] = useState<'home' | 'requestDetails'>('home');
   const [notificationsReturnScreen, setNotificationsReturnScreen] = useState<'home' | 'profile'>('home');
+  const [profileSetupChecking, setProfileSetupChecking] = useState(false);
+  const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
   const switchScreen = (nextScreen: AppScreen) => {
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
@@ -6938,6 +6941,53 @@ function AppContent() {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const checkRequiredProfile = async () => {
+      if (!session?.user.id) {
+        if (mounted) {
+          setNeedsProfileSetup(false);
+          setProfileSetupChecking(false);
+        }
+        return;
+      }
+
+      setProfileSetupChecking(true);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, phone, state, city, blood_group')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (!mounted) return;
+
+      if (error) {
+        console.warn('Unable to check profile completion:', error.message);
+        setNeedsProfileSetup(true);
+        setProfileSetupChecking(false);
+        return;
+      }
+
+      const complete = Boolean(
+        data?.full_name?.trim() &&
+        data?.phone?.trim() &&
+        data?.state?.trim() &&
+        data?.city?.trim() &&
+        data?.blood_group?.trim()
+      );
+
+      setNeedsProfileSetup(!complete);
+      setProfileSetupChecking(false);
+    };
+
+    void checkRequiredProfile();
+
+    return () => {
+      mounted = false;
+    };
+  }, [session?.user.id]);
 
   const goHome = () => { setSelectedRequestId(null); switchScreen('home'); };
   const goFindDonor = () => { setSelectedRequestId(null); setFindDonorReturnScreen('home'); switchScreen('findDonor'); };
@@ -7046,6 +7096,37 @@ function AppContent() {
 
   if (!session) {
     return <AuthScreen signIn={signIn} signUp={signUp} />;
+  }
+
+  if (profileSetupChecking) {
+    return <BloodDropLoader />;
+  }
+
+  if (needsProfileSetup) {
+    return (
+      <ProfileSetupScreen
+        initial={{}}
+        onSave={async (input) => {
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              full_name: input.fullName,
+              phone: input.phone,
+              state: input.state,
+              city: input.city,
+              blood_group: input.bloodGroup,
+              donor_available: input.donorAvailable,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', session.user.id);
+
+          if (error) return { error };
+
+          setNeedsProfileSetup(false);
+          return { error: null };
+        }}
+      />
+    );
   }
 
   return (
