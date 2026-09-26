@@ -56,6 +56,7 @@ type IncomingDonorRequest = {
   unitsRequired: number;
   hospitalName: string;
   city: string;
+  state: string;
   area: string;
   requiredDate: string | null;
   requiredTime: string | null;
@@ -3283,6 +3284,7 @@ function ProfileScreen({
     dateOfBirth: '',
     gender: '',
     city: '',
+    state: '',
     area: '',
     donorAvailable: false,
   });
@@ -3309,7 +3311,7 @@ function ProfileScreen({
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('full_name, phone, blood_group, date_of_birth, gender, city, area, donor_available, latitude, longitude, emergency_contact_name, emergency_contact_phone')
+      .select('full_name, phone, blood_group, date_of_birth, gender, state, city, area, donor_available, latitude, longitude, emergency_contact_name, emergency_contact_phone')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -3359,6 +3361,7 @@ function ProfileScreen({
       dateOfBirth: data.date_of_birth || '',
       gender: data.gender || '',
       city: data.city || '',
+      state: data.state || '',
       area: data.area || '',
       donorAvailable: data.donor_available ?? false,
       latitude: data.latitude,
@@ -3410,6 +3413,7 @@ function ProfileScreen({
         blood_group: draftProfile.bloodGroup || null,
         date_of_birth: draftProfile.dateOfBirth.trim() || null,
         gender: draftProfile.gender.trim() || null,
+        state: draftProfile.state.trim() || null,
         city: draftProfile.city.trim() || null,
         area: draftProfile.area.trim() || null,
       });
@@ -3713,7 +3717,7 @@ function ProfileScreen({
           <Text style={styles.profileName}>{profile.name}</Text>
           <View style={styles.profileLocationRow}>
             <MaterialCommunityIcons name="map-marker" size={16} color="#59413e" />
-            <Text style={styles.profileMutedText}>{[profile.city, profile.area].filter(Boolean).join(', ')}</Text>
+            <Text style={styles.profileMutedText}>{[profile.city, profile.state, profile.area].filter(Boolean).join(', ')}</Text>
           </View>
           <View style={styles.profileBadgeRow}>
             <View style={styles.profileBloodBadge}>
