@@ -1,10 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../utils/supabase';
-import { showMessage } from '../utils/interaction';
+import { setupRealtimeWithPollingFallback, supabase } from '../utils/supabase';
+import { sanitizeUserErrorMessage, showMessage } from '../utils/interaction';
 
 type NotificationItem = {
   id: string;
@@ -69,7 +69,7 @@ export function NotificationsScreen({
       .limit(50);
 
     if (result.error) {
-      setErrorMessage(result.error.message);
+      setErrorMessage(sanitizeUserErrorMessage(result.error, 'Unable to load notifications. Please try again.'));
       if (showLoading) setLoading(false);
       return;
     }
@@ -80,12 +80,16 @@ export function NotificationsScreen({
   }, [userId]);
 
   useEffect(() => {
+    let mounted = true;
     const initialLoad = setTimeout(() => {
       void loadNotifications(true);
     }, 0);
 
     if (!userId) {
-      return () => clearTimeout(initialLoad);
+      return () => {
+        mounted = false;
+        clearTimeout(initialLoad);
+      };
     }
 
     const channel = supabase
@@ -99,6 +103,7 @@ export function NotificationsScreen({
           filter: 'user_id=eq.' + userId,
         },
         (payload) => {
+          if (!mounted) return;
           if (payload.eventType === 'INSERT') {
             const row = payload.new as NotificationItem;
             setItems((current) => [row, ...current.filter((item) => item.id !== row.id)]);
@@ -112,19 +117,19 @@ export function NotificationsScreen({
             }
           }
         },
-      )
-      .subscribe();
+      );
 
-    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
-        void loadNotifications(false);
-      }
+    const cleanup = setupRealtimeWithPollingFallback({
+      channel,
+      onRefresh: () => loadNotifications(false),
+      pollIntervalMs: 30000,
+      isMounted: () => mounted,
     });
 
     return () => {
+      mounted = false;
       clearTimeout(initialLoad);
-      appStateSub.remove();
-      void supabase.removeChannel(channel);
+      cleanup();
     };
   }, [loadNotifications, userId]);
 
@@ -138,7 +143,7 @@ export function NotificationsScreen({
       .eq('user_id', user.id);
 
     if (result.error) {
-      showMessage('Unable to update notification', result.error.message);
+      showMessage('Unable to update notification', sanitizeUserErrorMessage(result.error, 'Unable to update notification.'));
       return;
     }
 
@@ -162,7 +167,7 @@ export function NotificationsScreen({
       .eq('user_id', user.id);
 
     if (result.error) {
-      showMessage('Unable to mark notifications read', result.error.message);
+      showMessage('Unable to mark notifications read', sanitizeUserErrorMessage(result.error, 'Unable to mark notifications read.'));
       return;
     }
 

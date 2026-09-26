@@ -1,10 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../utils/supabase';
-import { showMessage } from '../utils/interaction';
+import { setupRealtimeWithPollingFallback, supabase } from '../utils/supabase';
+import { sanitizeUserErrorMessage, showMessage } from '../utils/interaction';
 
 type WorkflowStage =
   | 'accepted'
@@ -90,6 +90,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   const [workflow, setWorkflow] = useState<WorkflowRow | null>(null);
   const [acceptedResponses, setAcceptedResponses] = useState<AcceptedResponse[]>([]);
   const [requesterId, setRequesterId] = useState<string | null>(null);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -100,7 +101,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     setErrorMessage('');
 
     const [requestResult, workflowResult, responseResult] = await Promise.all([
-      supabase.from('blood_requests').select('requester_id').eq('id', requestId).maybeSingle(),
+      supabase.from('blood_requests').select('requester_id, status').eq('id', requestId).maybeSingle(),
       supabase
         .from('donation_workflows')
         .select('id, request_id, donor_response_id, donor_id, stage, created_at, updated_at, completed_at')
@@ -115,13 +116,14 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     ]);
 
     if (requestResult.error) {
-      setErrorMessage(requestResult.error.message);
+      setErrorMessage(sanitizeUserErrorMessage(requestResult.error, 'Unable to load blood request details.'));
     } else {
       setRequesterId(requestResult.data?.requester_id ?? null);
+      setRequestStatus(requestResult.data?.status ?? null);
     }
 
     if (workflowResult.error) {
-      setErrorMessage((current) => current || workflowResult.error?.message || 'Unable to load donation workflow.');
+      setErrorMessage((current) => current || sanitizeUserErrorMessage(workflowResult.error, 'Unable to load donation workflow.'));
     } else {
       setWorkflow((workflowResult.data as WorkflowRow | null) ?? null);
     }
@@ -164,30 +166,24 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
         () => {
           if (mounted) void refresh(false);
         },
-      )
-      .subscribe();
+      );
 
-    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && mounted) {
-        void refresh(false);
-      }
+    const cleanup = setupRealtimeWithPollingFallback({
+      channel,
+      onRefresh: () => refresh(false),
+      pollIntervalMs: 10000,
+      isMounted: () => mounted,
     });
-
-    // Fallback polling interval every 10 seconds to recover gracefully if realtime drops
-    const pollInterval = setInterval(() => {
-      if (mounted) void refresh(false);
-    }, 10000);
 
     return () => {
       mounted = false;
       clearTimeout(initialLoad);
-      clearInterval(pollInterval);
-      appStateSub.remove();
-      void supabase.removeChannel(channel);
+      cleanup();
     };
   }, [refresh, requestId]);
 
   const selectDonor = async (responseId: string) => {
+    if (busy) return;
     setBusy(true);
     setErrorMessage('');
     const result = await supabase.rpc('select_donor_for_request', {
@@ -196,7 +192,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     });
 
     if (result.error) {
-      setErrorMessage(result.error.message);
+      setErrorMessage(sanitizeUserErrorMessage(result.error, 'Unable to select donor. Please try again.'));
       setBusy(false);
       return;
     }
@@ -215,7 +211,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   };
 
   const advance = async (nextStage: WorkflowStage) => {
-    if (!workflow) return;
+    if (busy || !workflow) return;
 
     if (nextStage === 'eligible') {
       const message = 'Only mark this stage after hospital medical staff confirm that the donor is medically eligible to donate.';
@@ -245,7 +241,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
   };
 
   const performAdvance = async (nextStage: WorkflowStage) => {
-    if (!workflow) return;
+    if (busy || !workflow) return;
     setBusy(true);
     setErrorMessage('');
 
@@ -255,7 +251,7 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
     });
 
     if (result.error) {
-      setErrorMessage(result.error.message);
+      setErrorMessage(sanitizeUserErrorMessage(result.error, 'Unable to update workflow stage. Please try again.'));
       setBusy(false);
       return;
     }
@@ -297,6 +293,42 @@ export function DonationWorkflowCard({ requestId }: { requestId: string }) {
               : currentStage === 'donating' && (isSelectedDonor || isRequester)
                 ? { stage: 'completed' as WorkflowStage, label: 'Mark donation completed', icon: 'check-circle-outline' as const }
                 : null;
+
+  if (requestStatus === 'cancelled') {
+    return (
+      <View style={workflowStyles.card}>
+        <View style={workflowStyles.headerRow}>
+          <View style={workflowStyles.iconCircle}>
+            <MaterialCommunityIcons name="cancel" size={20} color="#ba1a1a" />
+          </View>
+          <View style={workflowStyles.headerCopy}>
+            <Text style={workflowStyles.title}>Request Cancelled</Text>
+            <Text style={workflowStyles.subtitle}>
+              This blood request was cancelled. Active donation workflow is closed.
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (requestStatus === 'fulfilled' && !workflow) {
+    return (
+      <View style={workflowStyles.card}>
+        <View style={workflowStyles.headerRow}>
+          <View style={workflowStyles.iconCircle}>
+            <MaterialCommunityIcons name="check-decagram" size={20} color="#166534" />
+          </View>
+          <View style={workflowStyles.headerCopy}>
+            <Text style={workflowStyles.title}>Request Fulfilled</Text>
+            <Text style={workflowStyles.subtitle}>
+              This blood request has been fulfilled. Hospital documentation is the official donation record.
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (!workflow) {
     if (isRequester && acceptedResponses.length > 0) {

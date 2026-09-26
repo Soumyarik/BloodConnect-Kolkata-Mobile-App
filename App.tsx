@@ -7,6 +7,7 @@ import {
   Alert,
   Animated,
   AppState,
+  BackHandler,
   Easing,
   Image,
   ImageSourcePropType,
@@ -27,14 +28,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
-import { supabase } from './utils/supabase';
+import { setupRealtimeWithPollingFallback, supabase } from './utils/supabase';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { DonationWorkflowCard } from './components/DonationWorkflowCard';
 import { BloodConnectLogo } from './components/BloodConnectLogo';
 import { NotificationsScreen } from './components/NotificationsScreen';
 import { ProfileSetupScreen } from './components/ProfileSetupScreen';
-import { openAppSettings, openExternalUrl, showMessage } from './utils/interaction';
+import { openAppSettings, openExternalUrl, sanitizeUserErrorMessage, showMessage } from './utils/interaction';
 
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
@@ -235,7 +236,7 @@ function BloodDropLoader({ compact = false }: { compact?: boolean }) {
 
 function BloodDropTransitionOverlay() {
   return (
-    <View style={styles.transitionOverlay} pointerEvents="auto" accessibilityLabel="Loading">
+    <View style={styles.transitionOverlay} pointerEvents="none" accessibilityLabel="Loading">
       <BloodDropLoader compact />
     </View>
   );
@@ -582,24 +583,18 @@ function HomeScreen({
         () => {
           if (mounted) void loadUnread();
         },
-      )
-      .subscribe();
+      );
 
-    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && mounted) {
-        void loadUnread();
-      }
+    const cleanup = setupRealtimeWithPollingFallback({
+      channel,
+      onRefresh: () => loadUnread(),
+      pollIntervalMs: 30000,
+      isMounted: () => mounted,
     });
-
-    const pollInterval = setInterval(() => {
-      if (mounted) void loadUnread();
-    }, 30000);
 
     return () => {
       mounted = false;
-      clearInterval(pollInterval);
-      appStateSub.remove();
-      void supabase.removeChannel(channel);
+      cleanup();
     };
   }, [user?.id]);
 
@@ -1083,7 +1078,8 @@ function FindDonorScreen({
           let query = supabase
             .from('profiles')
             .select('id, full_name, blood_group, city, area, phone, donor_available, is_test_account, latitude, longitude')
-            .eq('is_test_account', false);
+            .eq('is_test_account', false)
+            .eq('donor_available', true);
 
           if (bloodGroup !== 'ALL' && bloodGroupsToQuery.length > 0) {
             query = query.in('blood_group', bloodGroupsToQuery);
@@ -1099,7 +1095,7 @@ function FindDonorScreen({
       const currentUserId = user?.id;
 
       const mapped: Donor[] = rows
-        .filter((row) => row.id !== currentUserId)
+        .filter((row) => row.id !== currentUserId && row.donor_available === true)
         .map((row) => {
           const donorArea = (row.area || '').toLowerCase().trim();
           const isSameArea = Boolean(
@@ -1410,7 +1406,7 @@ function FindDonorScreen({
   }, [selectedBlood, filterMode, userCity, userArea, deviceLocationCoords]);
 
   const sendDonorRequest = useCallback(async (donor: Donor) => {
-    if (!requestId) return;
+    if (!requestId || sendingDonorId) return;
     setSendingDonorId(donor.id);
     setErrorMessage('');
     try {
@@ -1422,11 +1418,11 @@ function FindDonorScreen({
       setSentStatusByDonor((current) => ({ ...current, [donor.id]: 'pending' }));
       showMessage('Request sent', donor.name + ' has received your blood-help request.');
     } catch (error) {
-      setErrorMessage('Unable to send request: ' + (error instanceof Error ? error.message : 'Please try again.'));
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to send blood-help request to this donor. Please try again.'));
     } finally {
       setSendingDonorId(null);
     }
-  }, [requestId]);
+  }, [requestId, sendingDonorId]);
 
   const requestDonor = useCallback((donor: Donor) => {
     if (!requestId) {
@@ -2266,23 +2262,19 @@ function RequestsScreen({
     ]);
 
     if (ownResult.error) {
-      setErrorMessage('Unable to load your requests: ' + ownResult.error.message);
+      setErrorMessage(sanitizeUserErrorMessage(ownResult.error, 'Unable to load your requests.'));
     } else {
       setRequests((ownResult.data as BloodRequestRow[]).map(toBloodRequest));
     }
 
     if (inboxResult.error) {
-      setErrorMessage((current) =>
-        current
-          ? current + ' | Donor inbox: ' + inboxResult.error.message
-          : 'Donor inbox unavailable: ' + inboxResult.error.message,
-      );
+      setErrorMessage((current) => current || sanitizeUserErrorMessage(inboxResult.error, 'Donor inbox unavailable.'));
     } else {
       setIncomingRequests(((inboxResult.data || []) as IncomingDonorRequestRow[]).map(mapIncomingRequest));
     }
 
     if (openResult.error) {
-      setErrorMessage((current) => current ? current + ' | Nearby requests: ' + openResult.error.message : 'Nearby requests unavailable: ' + openResult.error.message);
+      setErrorMessage((current) => current || sanitizeUserErrorMessage(openResult.error, 'Nearby open requests unavailable.'));
     } else {
       setOpenRequests(
         ((openResult.data || []) as OpenBloodRequestRow[])
@@ -2334,29 +2326,23 @@ function RequestsScreen({
         () => {
           if (mounted) void loadRequests();
         },
-      )
-      .subscribe();
+      );
 
-    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && mounted) {
-        void loadRequests();
-      }
+    const cleanup = setupRealtimeWithPollingFallback({
+      channel,
+      onRefresh: () => loadRequests(),
+      pollIntervalMs: 15000,
+      isMounted: () => mounted,
     });
-
-    const pollInterval = setInterval(() => {
-      if (mounted) void loadRequests();
-    }, 15000);
 
     return () => {
       mounted = false;
-      clearInterval(pollInterval);
-      appStateSub.remove();
-      void supabase.removeChannel(channel);
+      cleanup();
     };
   }, [user?.id]);
 
   const respondToDonorRequest = async (item: IncomingDonorRequest, status: 'accepted' | 'declined') => {
-    if (!user) return;
+    if (!user || respondingId) return;
 
     setRespondingId(item.responseId);
     setErrorMessage('');
@@ -2368,10 +2354,10 @@ function RequestsScreen({
 
     if (result.error) {
       setErrorMessage(
-        'Unable to ' +
-          (status === 'accepted' ? 'accept' : 'decline') +
-          ' this request: ' +
-          result.error.message,
+        sanitizeUserErrorMessage(
+          result.error,
+          'Unable to ' + (status === 'accepted' ? 'accept' : 'decline') + ' this request. Please try again.',
+        ),
       );
       setRespondingId(null);
       return;
@@ -2393,6 +2379,7 @@ function RequestsScreen({
   };
 
   const withdrawAcceptance = async (item: IncomingDonorRequest) => {
+    if (respondingId) return;
     setRespondingId(item.responseId);
     setErrorMessage('');
     try {
@@ -2400,7 +2387,7 @@ function RequestsScreen({
       if (result.error) throw new Error(result.error.message);
       setIncomingRequests((current) => current.map((entry) => entry.responseId === item.responseId ? { ...entry, responseStatus: 'withdrawn' } : entry));
     } catch (error) {
-      setErrorMessage('Unable to withdraw this response: ' + (error instanceof Error ? error.message : 'Please try again.'));
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to withdraw this response. Please try again.'));
     } finally {
       setRespondingId(null);
     }
@@ -2419,6 +2406,7 @@ function RequestsScreen({
   };
 
   const respondToOpenRequest = async (item: OpenBloodRequest) => {
+    if (respondingId) return;
     setRespondingId(item.id);
     setErrorMessage('');
     try {
@@ -2428,7 +2416,7 @@ function RequestsScreen({
       showMessage('You can help', 'The requester has been notified that you can help.');
       onRequestDetails(item.id);
     } catch (error) {
-      setErrorMessage('Unable to respond to this request: ' + (error instanceof Error ? error.message : 'Please try again.'));
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to respond to this request. Please try again.'));
     } finally {
       setRespondingId(null);
     }
@@ -2749,7 +2737,7 @@ function BloodRequestDetailsScreen({
     if (connectionResult.error || !connectionResult.data) {
       setRequest(null);
       setConnectionDetails(null);
-      setErrorMessage(`Unable to load request: ${connectionResult.error?.message || 'This request is not available to your account.'}`);
+      setErrorMessage(sanitizeUserErrorMessage(connectionResult.error, 'This blood request could not be loaded or is not available to your account.'));
       setLoading(false);
       return;
     }
@@ -2782,7 +2770,7 @@ function BloodRequestDetailsScreen({
     });
 
     if (responseError) {
-      setErrorMessage(`Request loaded, but donor responses could not be loaded: ${responseError.message}`);
+      setErrorMessage(sanitizeUserErrorMessage(responseError, 'Donor responses could not be loaded.'));
     } else {
       setDonorResponses((responseData || []).map((row) => ({
         id: row.id,
@@ -2794,6 +2782,8 @@ function BloodRequestDetailsScreen({
 
     setLoading(false);
   };
+
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -2838,24 +2828,18 @@ function BloodRequestDetailsScreen({
         () => {
           if (mounted) void refreshRequest(false);
         },
-      )
-      .subscribe();
+      );
 
-    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && mounted) {
-        void refreshRequest(false);
-      }
+    const cleanup = setupRealtimeWithPollingFallback({
+      channel,
+      onRefresh: () => refreshRequest(false),
+      pollIntervalMs: 10000,
+      isMounted: () => mounted,
     });
-
-    const pollInterval = setInterval(() => {
-      if (mounted) void refreshRequest(false);
-    }, 10000);
 
     return () => {
       mounted = false;
-      clearInterval(pollInterval);
-      appStateSub.remove();
-      void supabase.removeChannel(channel);
+      cleanup();
     };
   }, [requestId]);
 
@@ -2882,7 +2866,7 @@ function BloodRequestDetailsScreen({
   };
 
   const saveEditedRequest = async () => {
-    if (!request) return;
+    if (!request || editSaving) return;
     if (!editDraft.patientName.trim() || !editDraft.hospitalName.trim() || !editDraft.hospitalAddress.trim() || !editDraft.contactPhone.trim()) {
       showMessage('Missing details', 'Patient name, hospital, address and contact number are required.');
       return;
@@ -2921,7 +2905,7 @@ function BloodRequestDetailsScreen({
       .eq('requester_id', userData.user.id);
 
     if (error) {
-      setErrorMessage('Unable to update request: ' + error.message);
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to update request. Please try again.'));
       setEditSaving(false);
       return;
     }
@@ -2933,16 +2917,26 @@ function BloodRequestDetailsScreen({
   };
 
   const cancelRequest = async () => {
-    if (!request) return;
-    const { error } = await supabase.from('blood_requests').update({ status: 'cancelled' }).eq('id', request.id);
+    if (!request || cancelling) return;
+    setCancelling(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('blood_requests')
+      .update({ status: 'cancelled' })
+      .eq('id', request.id)
+      .eq('requester_id', userData.user?.id || '');
+
     if (error) {
-      setErrorMessage(`Unable to cancel request: ${error.message}`);
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to cancel request. Please try again.'));
+      setCancelling(false);
       return;
     }
     setRequest({ ...request, status: 'cancelled' });
+    setCancelling(false);
   };
 
   const confirmCancelRequest = () => {
+    if (cancelling) return;
     const message = 'Are you sure you want to cancel this request?';
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined' && window.confirm(message)) {
@@ -3460,6 +3454,7 @@ function ProfileScreen({
   };
 
   const saveProfile = async () => {
+    if (saving) return;
     setSaving(true);
     setProfileError('');
     try {
@@ -3476,7 +3471,7 @@ function ProfileScreen({
       setProfile({ ...draftProfile, donorAvailable: availableToDonate });
       setEditProfileVisible(false);
     } catch (error) {
-      setProfileError(`Unable to save your profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setProfileError(sanitizeUserErrorMessage(error, 'Unable to save your profile. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -3488,6 +3483,7 @@ function ProfileScreen({
   };
 
   const saveEmergencyContact = async () => {
+    if (saving) return;
     if (!draftContact.name.trim() || !draftContact.phone.trim() || !draftContact.relationship.trim()) {
       showMessage('Missing details', 'Please complete all emergency contact fields.');
       return;
@@ -3510,7 +3506,7 @@ function ProfileScreen({
       setEmergencyContact(draftContact);
       setContactVisible(false);
     } catch (error) {
-      setProfileError(`Unable to save emergency contact: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setProfileError(sanitizeUserErrorMessage(error, 'Unable to save emergency contact. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -3519,7 +3515,7 @@ function ProfileScreen({
   const [updatingLiveLocation, setUpdatingLiveLocation] = useState(false);
 
   const refreshDonorLiveLocation = async () => {
-    if (!profile) return;
+    if (!profile || updatingLiveLocation) return;
     setUpdatingLiveLocation(true);
     try {
       let permission = await Location.getForegroundPermissionsAsync();
@@ -3648,7 +3644,7 @@ function ProfileScreen({
       }
     } catch (error) {
       setAvailableToDonate(profile.donorAvailable);
-      setProfileError(`Unable to update availability: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setProfileError(sanitizeUserErrorMessage(error, 'Unable to update availability. Please try again.'));
     }
   };
 
@@ -3658,7 +3654,7 @@ function ProfileScreen({
     const fallbackName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'BloodConnect User';
     const result = await createProfile({ fullName: fallbackName, bloodGroup: user?.user_metadata?.blood_group || null });
     if (result.error) {
-      setProfileError(`Unable to create your profile: ${result.error.message}`);
+      setProfileError(sanitizeUserErrorMessage(result.error, 'Unable to create your profile. Please try again.'));
     } else {
       await loadProfile();
     }
@@ -3730,7 +3726,7 @@ function ProfileScreen({
       .order('donation_date', { ascending: false });
 
     if (result.error) {
-      showMessage('Donation History', result.error.message);
+      showMessage('Donation History', sanitizeUserErrorMessage(result.error, 'Unable to load donation history. Please try again.'));
       return;
     }
 
@@ -3952,74 +3948,76 @@ function ProfileScreen({
         <View style={styles.profileModalBackdrop}>
           <View style={styles.profileModalCard}>
             <Text style={styles.profileModalTitle}>Edit Profile</Text>
-            <Text style={styles.profileModalLabel}>Name</Text>
-            <TextInput
-              value={draftProfile.name}
-              onChangeText={(name) => setDraftProfile((current) => ({ ...current, name }))}
-              placeholder="Your name"
-              placeholderTextColor="#8d706d"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>Phone number</Text>
-            <TextInput
-              value={draftProfile.phone}
-              onChangeText={(phone) => setDraftProfile((current) => ({ ...current, phone }))}
-              placeholder="Your phone number"
-              placeholderTextColor="#8d706d"
-              keyboardType="phone-pad"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>City</Text>
-            <TextInput
-              value={draftProfile.city}
-              onChangeText={(city) => setDraftProfile((current) => ({ ...current, city }))}
-              placeholder="City"
-              placeholderTextColor="#8d706d"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>Area</Text>
-            <TextInput
-              value={draftProfile.area}
-              onChangeText={(area) => setDraftProfile((current) => ({ ...current, area }))}
-              placeholder="Area or locality"
-              placeholderTextColor="#8d706d"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>Date of birth</Text>
-            <TextInput
-              value={draftProfile.dateOfBirth}
-              onChangeText={(dateOfBirth) => setDraftProfile((current) => ({ ...current, dateOfBirth }))}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#8d706d"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>Gender</Text>
-            <TextInput
-              value={draftProfile.gender}
-              onChangeText={(gender) => setDraftProfile((current) => ({ ...current, gender }))}
-              placeholder="Gender"
-              placeholderTextColor="#8d706d"
-              style={styles.profileModalInput}
-            />
-            <Text style={styles.profileModalLabel}>Blood group</Text>
-            <View style={styles.profileBloodGrid}>
-              {bloodGroups.map((group) => (
-                <Pressable
-                  key={group}
-                  onPress={() => setDraftProfile((current) => ({ ...current, bloodGroup: group }))}
-                  style={[styles.profileBloodChoice, draftProfile.bloodGroup === group && styles.profileBloodChoiceSelected]}
-                >
-                  <Text style={[styles.profileBloodChoiceText, draftProfile.bloodGroup === group && styles.profileBloodChoiceTextSelected]}>
-                    {group}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }} keyboardShouldPersistTaps="handled">
+              <Text style={styles.profileModalLabel}>Name</Text>
+              <TextInput
+                value={draftProfile.name}
+                onChangeText={(name) => setDraftProfile((current) => ({ ...current, name }))}
+                placeholder="Your name"
+                placeholderTextColor="#8d706d"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>Phone number</Text>
+              <TextInput
+                value={draftProfile.phone}
+                onChangeText={(phone) => setDraftProfile((current) => ({ ...current, phone }))}
+                placeholder="Your phone number"
+                placeholderTextColor="#8d706d"
+                keyboardType="phone-pad"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>City</Text>
+              <TextInput
+                value={draftProfile.city}
+                onChangeText={(city) => setDraftProfile((current) => ({ ...current, city }))}
+                placeholder="City"
+                placeholderTextColor="#8d706d"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>Area</Text>
+              <TextInput
+                value={draftProfile.area}
+                onChangeText={(area) => setDraftProfile((current) => ({ ...current, area }))}
+                placeholder="Area or locality"
+                placeholderTextColor="#8d706d"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>Date of birth</Text>
+              <TextInput
+                value={draftProfile.dateOfBirth}
+                onChangeText={(dateOfBirth) => setDraftProfile((current) => ({ ...current, dateOfBirth }))}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#8d706d"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>Gender</Text>
+              <TextInput
+                value={draftProfile.gender}
+                onChangeText={(gender) => setDraftProfile((current) => ({ ...current, gender }))}
+                placeholder="Gender"
+                placeholderTextColor="#8d706d"
+                style={styles.profileModalInput}
+              />
+              <Text style={styles.profileModalLabel}>Blood group</Text>
+              <View style={styles.profileBloodGrid}>
+                {bloodGroups.map((group) => (
+                  <Pressable
+                    key={group}
+                    onPress={() => setDraftProfile((current) => ({ ...current, bloodGroup: group }))}
+                    style={[styles.profileBloodChoice, draftProfile.bloodGroup === group && styles.profileBloodChoiceSelected]}
+                  >
+                    <Text style={[styles.profileBloodChoiceText, draftProfile.bloodGroup === group && styles.profileBloodChoiceTextSelected]}>
+                      {group}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
             <View style={styles.profileModalActions}>
               <Pressable style={styles.profileModalCancel} onPress={() => setEditProfileVisible(false)}>
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.profileModalSave} onPress={saveProfile}>
+              <Pressable style={styles.profileModalSave} disabled={saving} onPress={saveProfile}>
                 <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
               </Pressable>
             </View>
@@ -4060,7 +4058,7 @@ function ProfileScreen({
               <Pressable style={styles.profileModalCancel} onPress={() => setContactVisible(false)}>
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.profileModalSave} onPress={saveEmergencyContact}>
+              <Pressable style={styles.profileModalSave} disabled={saving} onPress={saveEmergencyContact}>
                 <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Contact'}</Text>
               </Pressable>
             </View>
@@ -4250,6 +4248,8 @@ function RequestBloodScreen({
   };
 
   const handleSubmit = async () => {
+    if (saving) return;
+
     if (!patientName.trim() || !selectedBlood || !hospitalName.trim() || !location.trim() || !phone.trim()) {
       showMessage('Missing details', 'Please enter the patient name, required blood group, hospital, location and contact number.');
       return;
@@ -4288,7 +4288,7 @@ function RequestBloodScreen({
     }).select('id').single();
 
     if (error) {
-      setErrorMessage(`Unable to submit blood request: ${error.message}`);
+      setErrorMessage(sanitizeUserErrorMessage(error, 'Unable to submit blood request. Please check your connection and try again.'));
       setSaving(false);
       return;
     }
@@ -4580,7 +4580,11 @@ function RequestBloodScreen({
           </View>
 
           <View style={styles.submitWrap}>
-            <Pressable style={styles.submitButton} onPress={handleSubmit}>
+            <Pressable
+              style={[styles.submitButton, saving && { opacity: 0.7 }]}
+              onPress={handleSubmit}
+              disabled={saving}
+            >
               <MaterialCommunityIcons name="send" size={20} color="#ffffff" />
               <Text style={styles.submitButtonText}>{saving ? 'Submitting...' : 'Submit Blood Request'}</Text>
             </Pressable>
@@ -7017,7 +7021,7 @@ function AppContent() {
     transitionTimerRef.current = setTimeout(() => {
       setIsTransitioning(false);
       transitionTimerRef.current = null;
-    }, 620);
+    }, 200);
   };
 
   useEffect(() => {
@@ -7025,6 +7029,31 @@ function AppContent() {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const onHardwareBack = () => {
+      if (screen === 'requestDetails') {
+        switchScreen(requestDetailsReturnScreen);
+        return true;
+      }
+      if (screen === 'findDonor') {
+        switchScreen(findDonorReturnScreen);
+        return true;
+      }
+      if (screen === 'notifications') {
+        switchScreen(notificationsReturnScreen);
+        return true;
+      }
+      if (screen === 'request' || screen === 'requests' || screen === 'profile') {
+        switchScreen('home');
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+    return () => sub.remove();
+  }, [screen, requestDetailsReturnScreen, findDonorReturnScreen, notificationsReturnScreen]);
 
   useEffect(() => {
     let mounted = true;

@@ -24,6 +24,7 @@ import {
   POPULAR_CITIES,
   StateOption,
 } from '../utils/locationData';
+import { sanitizeUserErrorMessage } from '../utils/interaction';
 
 type AuthScreenProps = {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -106,6 +107,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   };
 
   const handleSubmit = async () => {
+    if (loading) return;
     setErrorMessage('');
     setNotice('');
 
@@ -164,7 +166,14 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
       if (mode === 'signup' && result.error.message.startsWith('Account created.')) {
         setNotice(result.error.message);
       } else {
-        setErrorMessage(result.error.message);
+        setErrorMessage(
+          sanitizeUserErrorMessage(
+            result.error,
+            mode === 'login'
+              ? 'Unable to log in. Please check your credentials and try again.'
+              : 'Unable to create account. Please try again.',
+          ),
+        );
       }
     }
   };

@@ -24,6 +24,7 @@ import {
   POPULAR_CITIES,
   StateOption,
 } from '../utils/locationData';
+import { sanitizeUserErrorMessage } from '../utils/interaction';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
@@ -109,6 +110,7 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
   };
 
   const handleSave = async () => {
+    if (saving) return;
     setErrorMessage('');
 
     if (!fullName.trim()) {
@@ -143,7 +145,9 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
     });
     setSaving(false);
 
-    if (result.error) setErrorMessage(result.error.message);
+    if (result.error) {
+      setErrorMessage(sanitizeUserErrorMessage(result.error, 'Unable to save your profile. Please try again.'));
+    }
   };
 
   const trimmedSearch = search.trim();
