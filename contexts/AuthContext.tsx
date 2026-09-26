@@ -55,7 +55,7 @@ async function ensureProfile(
       updates.donor_available = Boolean(profile.bloodGroup || existingProfile.blood_group);
     }
     if (!existingProfile.city) {
-      updates.city = details?.city || 'Kolkata';
+      updates.city = profile.city || 'Kolkata';
     }
     if (profile.phone && !existingProfile.phone) {
       updates.phone = profile.phone.trim();

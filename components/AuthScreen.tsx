@@ -1,19 +1,29 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { BloodConnectLogo } from './BloodConnectLogo';
-import { Cities, States } from 'countries-states-cities-service';
 import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
-  Modal,
   Text,
   TextInput,
   View,
 } from 'react-native';
+
+import { BloodConnectLogo } from './BloodConnectLogo';
+import {
+  CityOption,
+  findStateByCode,
+  findStateByName,
+  getCitiesForState,
+  INDIA_STATES,
+  inferStateFromCity,
+  POPULAR_CITIES,
+  StateOption,
+} from '../utils/locationData';
 
 type AuthScreenProps = {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -31,11 +41,6 @@ type AuthScreenProps = {
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
-const indiaStates = States.getStates({
-  filters: { country_code: 'IN' },
-  sort: { mode: 'alphabetical', key: 'name' },
-});
-
 export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [fullName, setFullName] = useState('');
@@ -43,8 +48,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [state, setState] = useState('');
-  const [stateCode, setStateCode] = useState('');
+  const [state, setState] = useState('West Bengal');
   const [city, setCity] = useState('');
   const [bloodGroup, setBloodGroup] = useState('');
   const [donorAvailable, setDonorAvailable] = useState(false);
@@ -54,22 +58,20 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [notice, setNotice] = useState('');
 
+  const stateCode = useMemo(() => {
+    return findStateByName(state)?.state_code || '';
+  }, [state]);
+
   const cities = useMemo(() => {
-    if (!stateCode) return [];
-    try {
-      return Cities.getCities({
-        filters: { country_code: 'IN', state_code: stateCode },
-        sort: { mode: 'alphabetical', key: 'name' },
-      });
-    } catch {
-      return [];
-    }
+    return getCitiesForState(stateCode);
   }, [stateCode]);
 
   const pickerOptions = useMemo(() => {
     const query = pickerSearch.trim().toLowerCase();
-    const options = picker === 'state' ? indiaStates : cities;
-    return options.filter((item) => !query || item.name.toLowerCase().includes(query));
+    if (picker === 'state') {
+      return INDIA_STATES.filter((item) => !query || item.name.toLowerCase().includes(query));
+    }
+    return cities.filter((item) => !query || item.name.toLowerCase().includes(query));
   }, [cities, picker, pickerSearch]);
 
   const switchMode = (nextMode: 'login' | 'signup') => {
@@ -82,6 +84,25 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const validatePhone = (value: string) => {
     const digits = value.replace(/\D/g, '');
     return digits.length === 10 || (digits.length === 12 && digits.startsWith('91'));
+  };
+
+  const selectState = (item: StateOption) => {
+    setState(item.name);
+    setPicker(null);
+  };
+
+  const selectCity = (cityName: string, cityStateCode?: string) => {
+    setCity(cityName);
+    if (cityStateCode) {
+      const matchedState = findStateByCode(cityStateCode);
+      if (matchedState && (!state || state !== matchedState.name)) {
+        setState(matchedState.name);
+      }
+    } else if (!state) {
+      const inferred = inferStateFromCity(cityName);
+      if (inferred) setState(inferred.name);
+    }
+    setPicker(null);
   };
 
   const handleSubmit = async () => {
@@ -106,11 +127,11 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
         setErrorMessage('Enter a valid 10-digit Indian mobile number.');
         return;
       }
-      if (!state) {
+      if (!state.trim()) {
         setErrorMessage('Select your state.');
         return;
       }
-      if (!city) {
+      if (!city.trim()) {
         setErrorMessage('Select your city.');
         return;
       }
@@ -127,7 +148,16 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
     setLoading(true);
     const result = mode === 'login'
       ? await signIn(email, password)
-      : await signUp({ fullName, email, password, phone, state, city, bloodGroup, donorAvailable });
+      : await signUp({
+          fullName: fullName.trim(),
+          email: email.trim(),
+          password,
+          phone: phone.trim(),
+          state: state.trim(),
+          city: city.trim(),
+          bloodGroup,
+          donorAvailable,
+        });
     setLoading(false);
 
     if (result.error) {
@@ -138,6 +168,9 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
       }
     }
   };
+
+  const trimmedSearch = pickerSearch.trim();
+  const showCustomOption = picker === 'city' && trimmedSearch.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -245,19 +278,31 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
 
               <Text style={styles.label}>City *</Text>
               <Pressable
-                style={[styles.selectButton, !state && styles.selectDisabled]}
+                style={styles.selectButton}
                 onPress={() => {
-                  if (!state) return;
                   setPickerSearch('');
                   setPicker('city');
                 }}
-                disabled={!state}
               >
                 <Text style={[styles.selectText, !city && styles.placeholder]}>
-                  {city || (state ? 'Select your city' : 'Select state first')}
+                  {city || 'Select your city'}
                 </Text>
                 <MaterialCommunityIcons name="chevron-down" size={20} color="#59413e" />
               </Pressable>
+
+              <View style={styles.quickChipsRow}>
+                {POPULAR_CITIES.slice(0, 4).map((quickCity) => (
+                  <Pressable
+                    key={quickCity}
+                    style={[styles.quickChip, city.toLowerCase() === quickCity.toLowerCase() && styles.quickChipSelected]}
+                    onPress={() => selectCity(quickCity, 'WB')}
+                  >
+                    <Text style={[styles.quickChipText, city.toLowerCase() === quickCity.toLowerCase() && styles.quickChipTextSelected]}>
+                      {quickCity}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
 
               <Text style={styles.label}>Blood group *</Text>
               <View style={styles.bloodGrid}>
@@ -320,7 +365,13 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>{picker === 'state' ? 'Select State / UT' : 'Select City'}</Text>
-                <Text style={styles.modalSubtitle}>{picker === 'state' ? 'All Indian states and union territories' : 'Cities for ' + state}</Text>
+                <Text style={styles.modalSubtitle}>
+                  {picker === 'state'
+                    ? `${pickerOptions.length} states & union territories`
+                    : state
+                      ? `Cities in ${state} (${pickerOptions.length} available)`
+                      : `All Indian cities (${pickerOptions.length} available)`}
+                </Text>
               </View>
               <Pressable style={styles.modalClose} onPress={() => setPicker(null)}>
                 <MaterialCommunityIcons name="close" size={20} color="#59413e" />
@@ -332,42 +383,66 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
               <TextInput
                 value={pickerSearch}
                 onChangeText={setPickerSearch}
-                placeholder={picker === 'state' ? 'Search state...' : 'Search city...'}
+                placeholder={picker === 'state' ? 'Search state...' : 'Search city or type custom...'}
                 placeholderTextColor="#8d706d"
                 style={styles.searchInput}
                 autoFocus
               />
+              {pickerSearch.length > 0 && (
+                <Pressable onPress={() => setPickerSearch('')}>
+                  <MaterialCommunityIcons name="close-circle" size={18} color="#8d706d" />
+                </Pressable>
+              )}
             </View>
 
             <ScrollView style={styles.optionsList} keyboardShouldPersistTaps="handled">
+              {showCustomOption && (
+                <Pressable
+                  style={[styles.optionRow, styles.customOptionRow]}
+                  onPress={() => selectCity(trimmedSearch)}
+                >
+                  <View style={styles.customOptionCopy}>
+                    <Text style={styles.customOptionLabel}>Use custom city name</Text>
+                    <Text style={styles.customOptionText}>{`"${trimmedSearch}"`}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="check" size={20} color="#760009" />
+                </Pressable>
+              )}
+
               {pickerOptions.map((item) => {
-                const code = picker === 'state'
-                  ? String((item as { state_code?: string }).state_code || '')
-                  : '';
+                const name = item.name;
+                const isSelected = picker === 'state' ? state === name : city === name;
                 return (
                   <Pressable
-                    key={item.name + '-' + (code || picker)}
-                    style={styles.optionRow}
+                    key={`${picker}-${item.id}-${name}`}
+                    style={[styles.optionRow, isSelected && styles.optionRowSelected]}
                     onPress={() => {
                       if (picker === 'state') {
-                        setState(item.name);
-                        setStateCode(code);
-                        setCity('');
+                        selectState(item as StateOption);
                       } else {
-                        setCity(item.name);
+                        const cityItem = item as CityOption;
+                        selectCity(cityItem.name, cityItem.state_code);
                       }
-                      setPicker(null);
                     }}
                   >
-                    <Text style={styles.optionText}>{item.name}</Text>
+                    <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>{name}</Text>
                     <MaterialCommunityIcons
-                      name={picker === 'state' ? 'map-marker-outline' : 'city-variant-outline'}
+                      name={isSelected ? 'check-circle' : picker === 'state' ? 'map-marker-outline' : 'city-variant-outline'}
                       size={19}
-                      color="#8d706d"
+                      color={isSelected ? '#760009' : '#8d706d'}
                     />
                   </Pressable>
                 );
               })}
+
+              {!pickerOptions.length && !showCustomOption ? (
+                <View style={styles.emptyOptions}>
+                  <MaterialCommunityIcons name="map-search-outline" size={24} color="#8d706d" />
+                  <Text style={styles.emptyOptionsText}>
+                    No matching {picker === 'state' ? 'state' : 'city'} found.
+                  </Text>
+                </View>
+              ) : null}
             </ScrollView>
           </View>
         </View>
@@ -400,7 +475,11 @@ const styles = StyleSheet.create({
   selectButton: { minHeight: 48, backgroundColor: '#f2f4f6', borderRadius: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   selectText: { color: '#191c1e', fontSize: 15, lineHeight: 21, flex: 1 },
   placeholder: { color: '#8d706d' },
-  selectDisabled: { opacity: 0.6 },
+  quickChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 4 },
+  quickChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#f2f4f6', borderWidth: 1, borderColor: 'transparent' },
+  quickChipSelected: { backgroundColor: '#fff0ee', borderColor: '#760009' },
+  quickChipText: { fontSize: 12, color: '#59413e', fontWeight: '500' },
+  quickChipTextSelected: { color: '#760009', fontWeight: '700' },
   donorCard: { marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff7f5', borderWidth: 1, borderColor: '#ffdad6', borderRadius: 16, padding: 14 },
   donorCopy: { flex: 1 },
   donorTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -414,9 +493,17 @@ const styles = StyleSheet.create({
   modalClose: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f2f4f6', alignItems: 'center', justifyContent: 'center' },
   searchBox: { minHeight: 46, borderRadius: 12, backgroundColor: '#f2f4f6', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, marginBottom: 8 },
   searchInput: { flex: 1, color: '#191c1e', fontSize: 14, padding: 0 },
-  optionsList: { maxHeight: 500 },
-  optionRow: { minHeight: 48, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#eceef0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  optionsList: { maxHeight: 450 },
+  optionRow: { minHeight: 48, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: '#eceef0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  optionRowSelected: { backgroundColor: '#fff7f5' },
   optionText: { color: '#191c1e', fontSize: 14, lineHeight: 20, fontWeight: '500', flex: 1 },
+  optionTextSelected: { color: '#760009', fontWeight: '700' },
+  customOptionRow: { backgroundColor: '#fff7f5', borderRadius: 10, marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10, borderColor: '#ffdad6', borderWidth: 1 },
+  customOptionCopy: { flex: 1 },
+  customOptionLabel: { fontSize: 11, color: '#8d706d', textTransform: 'uppercase', fontWeight: '600', letterSpacing: 0.5 },
+  customOptionText: { fontSize: 14, color: '#760009', fontWeight: '700', marginTop: 2 },
+  emptyOptions: { alignItems: 'center', justifyContent: 'center', paddingVertical: 36, gap: 8 },
+  emptyOptionsText: { color: '#8d706d', fontSize: 13 },
   errorText: { color: '#ba1a1a', fontSize: 13, lineHeight: 18, marginTop: 12 },
   noticeText: { color: '#166534', backgroundColor: '#f0fdf4', borderRadius: 10, padding: 10, fontSize: 13, lineHeight: 18, marginTop: 12 },
   submitButton: { minHeight: 50, borderRadius: 999, backgroundColor: '#760009', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 18 },

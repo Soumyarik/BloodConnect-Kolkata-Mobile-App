@@ -68,7 +68,7 @@ type IncomingDonorRequest = {
 
 type IncomingDonorRequestRow = {
   response_id: string; request_id: string; patient_name: string; blood_group: string;
-  units_required: number; hospital_name: string; city: string; area: string;
+  units_required: number; hospital_name: string; city: string; state?: string; area: string;
   required_date: string | null; required_time: string | null; is_emergency: boolean;
   request_status: string; response_status: string; created_at: string;
 };
@@ -76,7 +76,7 @@ type IncomingDonorRequestRow = {
 const mapIncomingRequest = (row: IncomingDonorRequestRow): IncomingDonorRequest => ({
   responseId: row.response_id, requestId: row.request_id, patientName: row.patient_name,
   bloodGroup: row.blood_group, unitsRequired: row.units_required, hospitalName: row.hospital_name,
-  city: row.city, area: row.area, requiredDate: row.required_date, requiredTime: row.required_time,
+  city: row.city, state: row.state || '', area: row.area, requiredDate: row.required_date, requiredTime: row.required_time,
   isEmergency: row.is_emergency, requestStatus: row.request_status,
   responseStatus: row.response_status, createdAt: row.created_at,
 });

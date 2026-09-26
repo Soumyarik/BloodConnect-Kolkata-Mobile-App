@@ -1,6 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Cities, States } from 'countries-states-cities-service';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +13,17 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import {
+  CityOption,
+  findStateByCode,
+  findStateByName,
+  getCitiesForState,
+  INDIA_STATES,
+  inferStateFromCity,
+  POPULAR_CITIES,
+  StateOption,
+} from '../utils/locationData';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
@@ -33,57 +43,31 @@ type ProfileSetupScreenProps = {
 
 type PickerType = 'state' | 'city' | null;
 
-const INDIA_STATES = States.getStates({
-  filters: { country_code: 'IN' },
-  sort: { mode: 'alphabetical', key: 'name' },
-});
-
 export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps) {
   const [fullName, setFullName] = useState(initial.fullName || '');
   const [phone, setPhone] = useState(initial.phone || '');
-  const [state, setState] = useState(initial.state || '');
-  const [stateCode, setStateCode] = useState('');
-  const [city, setCity] = useState(initial.city || '');
+  const [state, setState] = useState(() => {
+    if (initial.state?.trim()) return initial.state.trim();
+    if (initial.city?.trim()) {
+      const inferred = inferStateFromCity(initial.city);
+      if (inferred) return inferred.name;
+    }
+    return 'West Bengal';
+  });
+  const [city, setCity] = useState(initial.city || 'Kolkata');
   const [bloodGroup, setBloodGroup] = useState(initial.bloodGroup || '');
   const [donorAvailable, setDonorAvailable] = useState(Boolean(initial.donorAvailable));
-  const [cities, setCities] = useState<Array<{ name: string; state_code?: string }>>([]);
   const [picker, setPicker] = useState<PickerType>(null);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const [loadingCities, setLoadingCities] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    const matchingState = INDIA_STATES.find(
-      (item) => item.name.toLowerCase() === (initial.state || '').toLowerCase(),
-    );
-    if (matchingState) {
-      setStateCode(matchingState.state_code || '');
-    }
-  }, [initial.state]);
+  const stateCode = useMemo(() => {
+    return findStateByName(state)?.state_code || '';
+  }, [state]);
 
-  useEffect(() => {
-    if (!stateCode) {
-      setCities([]);
-      return;
-    }
-
-    setLoadingCities(true);
-    try {
-      const stateCities = Cities.getCities({
-        filters: { country_code: 'IN', state_code: stateCode },
-        sort: { mode: 'alphabetical', key: 'name' },
-      });
-      const uniqueCities = Array.from(
-        new Map(stateCities.map((item) => [item.name.toLowerCase(), item])).values(),
-      );
-      setCities(uniqueCities);
-    } catch (error) {
-      setCities([]);
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to load cities for this state.');
-    } finally {
-      setLoadingCities(false);
-    }
+  const cities = useMemo(() => {
+    return getCitiesForState(stateCode);
   }, [stateCode]);
 
   const filteredOptions = useMemo(() => {
@@ -100,15 +84,22 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
     setPicker(type);
   };
 
-  const selectState = (name: string, code: string) => {
-    setState(name);
-    setStateCode(code);
-    setCity('');
+  const selectState = (item: StateOption) => {
+    setState(item.name);
     setPicker(null);
   };
 
-  const selectCity = (name: string) => {
-    setCity(name);
+  const selectCity = (cityName: string, cityStateCode?: string) => {
+    setCity(cityName);
+    if (cityStateCode) {
+      const matchedState = findStateByCode(cityStateCode);
+      if (matchedState && (!state || state !== matchedState.name)) {
+        setState(matchedState.name);
+      }
+    } else if (!state) {
+      const inferred = inferStateFromCity(cityName);
+      if (inferred) setState(inferred.name);
+    }
     setPicker(null);
   };
 
@@ -128,11 +119,11 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
       setErrorMessage('Enter a valid 10-digit Indian mobile number.');
       return;
     }
-    if (!state) {
+    if (!state.trim()) {
       setErrorMessage('Please select your state.');
       return;
     }
-    if (!city) {
+    if (!city.trim()) {
       setErrorMessage('Please select your city.');
       return;
     }
@@ -145,8 +136,8 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
     const result = await onSave({
       fullName: fullName.trim(),
       phone: phone.trim(),
-      state,
-      city,
+      state: state.trim(),
+      city: city.trim(),
       bloodGroup,
       donorAvailable,
     });
@@ -154,6 +145,9 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
 
     if (result.error) setErrorMessage(result.error.message);
   };
+
+  const trimmedSearch = search.trim();
+  const showCustomOption = picker === 'city' && trimmedSearch.length > 0;
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -200,22 +194,28 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
 
           <Text style={styles.label}>City *</Text>
           <Pressable
-            style={[styles.selectButton, !state && styles.selectDisabled]}
-            onPress={() => state && openPicker('city')}
-            disabled={!state}
+            style={styles.selectButton}
+            onPress={() => openPicker('city')}
           >
             <Text style={[styles.selectText, !city && styles.placeholder]}>
-              {city || (state ? 'Select your city' : 'Select state first')}
+              {city || 'Select your city'}
             </Text>
             <MaterialCommunityIcons name="chevron-down" size={20} color="#59413e" />
           </Pressable>
 
-          {loadingCities ? (
-            <View style={styles.inlineLoading}>
-              <ActivityIndicator size="small" color="#760009" />
-              <Text style={styles.inlineLoadingText}>Loading cities...</Text>
-            </View>
-          ) : null}
+          <View style={styles.quickChipsRow}>
+            {POPULAR_CITIES.slice(0, 4).map((quickCity) => (
+              <Pressable
+                key={quickCity}
+                style={[styles.quickChip, city.toLowerCase() === quickCity.toLowerCase() && styles.quickChipSelected]}
+                onPress={() => selectCity(quickCity, 'WB')}
+              >
+                <Text style={[styles.quickChipText, city.toLowerCase() === quickCity.toLowerCase() && styles.quickChipTextSelected]}>
+                  {quickCity}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
           <Text style={styles.label}>Blood group *</Text>
           <View style={styles.bloodGrid}>
@@ -280,8 +280,10 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
                 <Text style={styles.modalTitle}>{picker === 'state' ? 'Select State / UT' : 'Select City'}</Text>
                 <Text style={styles.modalSubtitle}>
                   {picker === 'state'
-                    ? String(filteredOptions.length) + ' options'
-                    : String(filteredOptions.length) + ' cities'}
+                    ? `${filteredOptions.length} states & union territories`
+                    : state
+                      ? `Cities in ${state} (${filteredOptions.length} available)`
+                      : `All Indian cities (${filteredOptions.length} available)`}
                 </Text>
               </View>
               <Pressable style={styles.modalClose} onPress={() => setPicker(null)} accessibilityLabel="Close selector">
@@ -294,36 +296,59 @@ export function ProfileSetupScreen({ initial, onSave }: ProfileSetupScreenProps)
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder={picker === 'state' ? 'Search state...' : 'Search city...'}
+                placeholder={picker === 'state' ? 'Search state...' : 'Search city or type custom...'}
                 placeholderTextColor="#8d706d"
                 style={styles.searchInput}
                 autoFocus
               />
+              {search.length > 0 && (
+                <Pressable onPress={() => setSearch('')}>
+                  <MaterialCommunityIcons name="close-circle" size={18} color="#8d706d" />
+                </Pressable>
+              )}
             </View>
 
             <ScrollView style={styles.optionsList} keyboardShouldPersistTaps="handled">
+              {showCustomOption && (
+                <Pressable
+                  style={[styles.optionRow, styles.customOptionRow]}
+                  onPress={() => selectCity(trimmedSearch)}
+                >
+                  <View style={styles.customOptionCopy}>
+                    <Text style={styles.customOptionLabel}>Use custom city name</Text>
+                    <Text style={styles.customOptionText}>{`"${trimmedSearch}"`}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="check" size={20} color="#760009" />
+                </Pressable>
+              )}
+
               {filteredOptions.map((item) => {
                 const name = item.name;
-                const code =
-                  picker === 'state'
-                    ? String((item as { state_code?: string }).state_code || '')
-                    : '';
+                const isSelected = picker === 'state' ? state === name : city === name;
                 return (
                   <Pressable
-                    key={name + '-' + (code || picker || 'city')}
-                    style={styles.optionRow}
-                    onPress={() => (picker === 'state' ? selectState(name, code) : selectCity(name))}
+                    key={`${picker}-${item.id}-${name}`}
+                    style={[styles.optionRow, isSelected && styles.optionRowSelected]}
+                    onPress={() => {
+                      if (picker === 'state') {
+                        selectState(item as StateOption);
+                      } else {
+                        const cityItem = item as CityOption;
+                        selectCity(cityItem.name, cityItem.state_code);
+                      }
+                    }}
                   >
-                    <Text style={styles.optionText}>{name}</Text>
+                    <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>{name}</Text>
                     <MaterialCommunityIcons
-                      name={picker === 'state' ? 'map-marker-outline' : 'city-variant-outline'}
+                      name={isSelected ? 'check-circle' : picker === 'state' ? 'map-marker-outline' : 'city-variant-outline'}
                       size={19}
-                      color="#8d706d"
+                      color={isSelected ? '#760009' : '#8d706d'}
                     />
                   </Pressable>
                 );
               })}
-              {!filteredOptions.length ? (
+
+              {!filteredOptions.length && !showCustomOption ? (
                 <View style={styles.emptyOptions}>
                   <MaterialCommunityIcons name="map-search-outline" size={24} color="#8d706d" />
                   <Text style={styles.emptyOptionsText}>
@@ -349,38 +374,46 @@ const styles = StyleSheet.create({
   sectionLabel: { color: '#760009', fontSize: 12, lineHeight: 16, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
   label: { color: '#59413e', fontSize: 13, lineHeight: 18, fontWeight: '700', marginTop: 12, marginBottom: 7 },
   input: { minHeight: 48, backgroundColor: '#f2f4f6', borderRadius: 12, paddingHorizontal: 14, color: '#191c1e', fontSize: 15, lineHeight: 21 },
+  bloodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  bloodButton: { width: '22%', minHeight: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f2f4f6' },
+  bloodButtonSelected: { backgroundColor: '#760009' },
+  bloodText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  bloodTextSelected: { color: '#ffffff' },
   selectButton: { minHeight: 48, backgroundColor: '#f2f4f6', borderRadius: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   selectText: { color: '#191c1e', fontSize: 15, lineHeight: 21, flex: 1 },
   placeholder: { color: '#8d706d' },
-  selectDisabled: { opacity: 0.6 },
-  bloodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  bloodButton: { width: '22%', minHeight: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f2f4f6' },
-  bloodButtonSelected: { backgroundColor: '#760009' },
-  bloodText: { color: '#191c1e', fontSize: 13, lineHeight: 18, fontWeight: '700' },
-  bloodTextSelected: { color: '#ffffff' },
-  donorCard: { marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff7f5', borderWidth: 1, borderColor: '#ffdad6', borderRadius: 16, padding: 14 },
+  quickChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 4 },
+  quickChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#f2f4f6', borderWidth: 1, borderColor: 'transparent' },
+  quickChipSelected: { backgroundColor: '#fff0ee', borderColor: '#760009' },
+  quickChipText: { fontSize: 12, color: '#59413e', fontWeight: '500' },
+  quickChipTextSelected: { color: '#760009', fontWeight: '700' },
+  donorCard: { marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff7f5', borderWidth: 1, borderColor: '#ffdad6', borderRadius: 16, padding: 14 },
   donorCopy: { flex: 1 },
   donorTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   donorTitle: { color: '#191c1e', fontSize: 14, lineHeight: 19, fontWeight: '700' },
   donorSubtitle: { color: '#59413e', fontSize: 11, lineHeight: 16, marginTop: 3 },
-  privacyBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#f2f4f6', borderRadius: 12, padding: 11, marginTop: 12 },
-  privacyText: { flex: 1, color: '#59413e', fontSize: 11, lineHeight: 16 },
-  inlineLoading: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  inlineLoadingText: { color: '#59413e', fontSize: 11, lineHeight: 16 },
-  errorText: { color: '#ba1a1a', backgroundColor: '#ffdad6', borderRadius: 12, padding: 11, fontSize: 13, lineHeight: 18, marginTop: 12 },
+  privacyBox: { marginTop: 14, flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: '#f7f9fb', borderRadius: 12, padding: 12 },
+  privacyText: { flex: 1, color: '#59413e', fontSize: 12, lineHeight: 17 },
+  errorText: { color: '#ba1a1a', fontSize: 13, lineHeight: 18, marginTop: 12 },
   saveButton: { minHeight: 50, borderRadius: 999, backgroundColor: '#760009', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 18 },
-  saveText: { color: '#ffffff', fontSize: 14, lineHeight: 20, fontWeight: '800' },
+  saveText: { color: '#ffffff', fontSize: 14, lineHeight: 20, fontWeight: '700' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(25, 28, 30, 0.45)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '82%', padding: 18 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   modalTitle: { color: '#191c1e', fontSize: 20, lineHeight: 27, fontWeight: '700' },
-  modalSubtitle: { color: '#59413e', fontSize: 11, lineHeight: 16, marginTop: 2 },
+  modalSubtitle: { color: '#59413e', fontSize: 11, lineHeight: 16, marginTop: 2, maxWidth: 300 },
   modalClose: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f2f4f6', alignItems: 'center', justifyContent: 'center' },
   searchBox: { minHeight: 46, borderRadius: 12, backgroundColor: '#f2f4f6', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, marginBottom: 8 },
   searchInput: { flex: 1, color: '#191c1e', fontSize: 14, padding: 0 },
-  optionsList: { maxHeight: 500 },
-  optionRow: { minHeight: 48, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: '#eceef0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  optionsList: { maxHeight: 450 },
+  optionRow: { minHeight: 48, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: '#eceef0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  optionRowSelected: { backgroundColor: '#fff7f5' },
   optionText: { color: '#191c1e', fontSize: 14, lineHeight: 20, fontWeight: '500', flex: 1 },
-  emptyOptions: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 7 },
-  emptyOptionsText: { color: '#59413e', fontSize: 13, lineHeight: 18 },
+  optionTextSelected: { color: '#760009', fontWeight: '700' },
+  customOptionRow: { backgroundColor: '#fff7f5', borderRadius: 10, marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10, borderColor: '#ffdad6', borderWidth: 1 },
+  customOptionCopy: { flex: 1 },
+  customOptionLabel: { fontSize: 11, color: '#8d706d', textTransform: 'uppercase', fontWeight: '600', letterSpacing: 0.5 },
+  customOptionText: { fontSize: 14, color: '#760009', fontWeight: '700', marginTop: 2 },
+  emptyOptions: { alignItems: 'center', justifyContent: 'center', paddingVertical: 36, gap: 8 },
+  emptyOptionsText: { color: '#8d706d', fontSize: 13 },
 });
