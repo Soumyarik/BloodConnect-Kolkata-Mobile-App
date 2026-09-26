@@ -7,7 +7,11 @@ type SignUpInput = {
   fullName: string;
   email: string;
   password: string;
+  phone: string;
+  state: string;
+  city: string;
   bloodGroup: string;
+  donorAvailable: boolean;
 };
 
 type ProfileBootstrap = {
@@ -30,10 +34,19 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-async function ensureProfile(userId: string, profile: ProfileBootstrap) {
+async function ensureProfile(
+  userId: string,
+  profile: ProfileBootstrap,
+  details?: {
+    phone?: string;
+    state?: string;
+    city?: string;
+    donorAvailable?: boolean;
+  }
+) {
   const { data: existingProfile, error: lookupError } = await supabase
     .from('profiles')
-    .select('id, blood_group, city, donor_available')
+    .select('id, blood_group, city, donor_available, phone, state')
     .eq('id', userId)
     .maybeSingle();
 
@@ -44,7 +57,19 @@ async function ensureProfile(userId: string, profile: ProfileBootstrap) {
       updates.donor_available = Boolean(profile.bloodGroup || existingProfile.blood_group);
     }
     if (!existingProfile.city) {
-      updates.city = 'Kolkata';
+      updates.city = details?.city || 'Kolkata';
+    }
+    if (details?.phone && !existingProfile.phone) {
+      updates.phone = details.phone.trim();
+    }
+    if (details?.state && !existingProfile.state) {
+      updates.state = details.state;
+    }
+    if (details?.city && (!existingProfile.city || existingProfile.city === 'Kolkata')) {
+      updates.city = details.city;
+    }
+    if (typeof details?.donorAvailable === 'boolean') {
+      updates.donor_available = details.donorAvailable;
     }
     if (!existingProfile.blood_group && profile.bloodGroup) {
       updates.blood_group = profile.bloodGroup;
@@ -60,8 +85,12 @@ async function ensureProfile(userId: string, profile: ProfileBootstrap) {
     id: userId,
     full_name: profile.fullName.trim(),
     blood_group: profile.bloodGroup,
-    city: 'Kolkata',
-    donor_available: Boolean(profile.bloodGroup),
+    phone: details?.phone?.trim() || null,
+    state: details?.state || null,
+    city: details?.city || 'Kolkata',
+    donor_available: typeof details?.donorAvailable === 'boolean'
+      ? details.donorAvailable
+      : Boolean(profile.bloodGroup),
   });
 
   if (error?.code === '23505') return null;
@@ -144,7 +173,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signUp = async ({ fullName, email, password, bloodGroup }: SignUpInput): Promise<AuthResult> => {
+  const signUp = async ({
+    fullName,
+    email,
+    password,
+    phone,
+    state,
+    city,
+    bloodGroup,
+    donorAvailable,
+  }: SignUpInput): Promise<AuthResult> => {
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -152,6 +190,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         data: {
           full_name: fullName.trim(),
           blood_group: bloodGroup || null,
+          phone: phone.trim(),
+          state,
+          city,
+          donor_available: donorAvailable,
         },
       },
     });
@@ -167,7 +209,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const profileError = await ensureProfile(data.user.id, profileInput);
+    const profileError = await ensureProfile(data.user.id, profileInput, {
+    phone,
+    state,
+    city,
+    donorAvailable,
+  });
 
     if (profileError) {
       await supabase.auth.signOut();
