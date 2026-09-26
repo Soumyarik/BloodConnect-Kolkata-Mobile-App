@@ -6969,7 +6969,7 @@ function AppContent() {
       setProfileSetupChecking(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('full_name, phone, state, city, blood_group')
+        .select('full_name, phone, state, city, blood_group, donor_available')
         .eq('id', session.user.id)
         .maybeSingle();
 
@@ -6997,6 +6997,7 @@ function AppContent() {
           state: data?.state || '',
           city: data?.city || '',
           bloodGroup: data?.blood_group || session.user.user_metadata?.blood_group || '',
+          donorAvailable: Boolean(data?.donor_available),
         });
       } else {
         setProfileSetupInitial({});
