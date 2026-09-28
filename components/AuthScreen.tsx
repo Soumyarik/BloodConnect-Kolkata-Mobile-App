@@ -392,9 +392,22 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
         </View>
       </ScrollView>
 
-      <Modal visible={picker !== null} transparent animationType="slide" onRequestClose={() => setPicker(null)}>
+      <Modal
+        visible={picker !== null}
+        transparent
+        animationType={Platform.OS === 'web' ? 'none' : 'slide'}
+        onRequestClose={() => setPicker(null)}
+        accessibilityRole="dialog"
+        accessibilityLabel={picker === 'state' ? 'Select State / UT' : 'Select City'}
+        aria-modal={true}
+      >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <View
+            style={styles.modalCard}
+            accessibilityRole="dialog"
+            accessibilityLabel={picker === 'state' ? 'Select State / UT' : 'Select City'}
+            aria-modal={true}
+          >
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>{picker === 'state' ? 'Select State / UT' : 'Select City'}</Text>
