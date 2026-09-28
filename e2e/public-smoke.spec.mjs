@@ -14,7 +14,7 @@ test.describe('BloodConnect public web smoke tests', () => {
 
     await expect(page.getByLabel('Full name')).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
-    await expect(page.getByLabel('Password')).toBeVisible();
+    await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Confirm password')).toBeVisible();
     await expect(page.getByLabel('Phone number')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Select state' })).toBeVisible();
@@ -32,7 +32,7 @@ test.describe('BloodConnect public web smoke tests', () => {
     await expect(page.getByText('Select State / UT', { exact: true })).toBeVisible();
 
     await page.getByLabel('Search state').fill('West Bengal');
-    await expect(page.getByText('West Bengal', { exact: true })).toBeVisible();
+    await expect(page.getByText('West Bengal', { exact: true }).last()).toBeVisible();
     await page.getByText('West Bengal', { exact: true }).last().click();
 
     await page.getByRole('button', { name: 'Select city' }).click();
@@ -71,8 +71,8 @@ test.describe('BloodConnect public web smoke tests', () => {
 
     const donorSwitch = page.getByLabel('Available to donate blood');
     await expect(donorSwitch).toBeVisible();
-    await expect(donorSwitch).toHaveAttribute('aria-checked', 'false');
+    await expect(donorSwitch).not.toBeChecked();
     await donorSwitch.click();
-    await expect(donorSwitch).toHaveAttribute('aria-checked', 'true');
+    await expect(donorSwitch).toBeChecked();
   });
 });
