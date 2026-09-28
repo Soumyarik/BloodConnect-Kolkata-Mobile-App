@@ -397,15 +397,15 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
         transparent
         animationType={Platform.OS === 'web' ? 'none' : 'slide'}
         onRequestClose={() => setPicker(null)}
-        accessibilityRole="dialog"
-        accessibilityLabel={picker === 'state' ? 'Select State / UT' : 'Select City'}
+        role="dialog"
+        aria-label={picker === 'state' ? 'Select State / UT' : 'Select City'}
         aria-modal={true}
       >
         <View style={styles.modalBackdrop}>
           <View
             style={styles.modalCard}
-            accessibilityRole="dialog"
-            accessibilityLabel={picker === 'state' ? 'Select State / UT' : 'Select City'}
+            role="dialog"
+            aria-label={picker === 'state' ? 'Select State / UT' : 'Select City'}
             aria-modal={true}
           >
             <View style={styles.modalHeader}>
