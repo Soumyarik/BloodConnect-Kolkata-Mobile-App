@@ -196,12 +196,16 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
             <Pressable
               style={[styles.modeButton, mode === 'login' && styles.modeButtonActive]}
               onPress={() => switchMode('login')}
+              accessibilityRole="tab"
+              accessibilityLabel="Login"
             >
               <Text style={[styles.modeText, mode === 'login' && styles.modeTextActive]}>Login</Text>
             </Pressable>
             <Pressable
               style={[styles.modeButton, mode === 'signup' && styles.modeButtonActive]}
               onPress={() => switchMode('signup')}
+              accessibilityRole="tab"
+              accessibilityLabel="Sign Up"
             >
               <Text style={[styles.modeText, mode === 'signup' && styles.modeTextActive]}>Sign Up</Text>
             </Pressable>
@@ -219,6 +223,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 value={fullName}
                 onChangeText={setFullName}
                 placeholder="Enter your full name"
+                accessibilityLabel="Full name"
                 placeholderTextColor="#8d706d"
                 style={styles.input}
                 autoCapitalize="words"
@@ -231,6 +236,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
             value={email}
             onChangeText={setEmail}
             placeholder="you@example.com"
+            accessibilityLabel="Email"
             placeholderTextColor="#8d706d"
             style={styles.input}
             keyboardType="email-address"
@@ -243,6 +249,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
             value={password}
             onChangeText={setPassword}
             placeholder="Enter your password"
+            accessibilityLabel="Password"
             placeholderTextColor="#8d706d"
             style={styles.input}
             secureTextEntry
@@ -255,6 +262,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 placeholder="Re-enter your password"
+                accessibilityLabel="Confirm password"
                 placeholderTextColor="#8d706d"
                 style={styles.input}
                 secureTextEntry
@@ -265,6 +273,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 value={phone}
                 onChangeText={setPhone}
                 placeholder="10-digit mobile number"
+                accessibilityLabel="Phone number"
                 placeholderTextColor="#8d706d"
                 style={styles.input}
                 keyboardType="phone-pad"
@@ -274,6 +283,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
               <Text style={styles.label}>State *</Text>
               <Pressable
                 style={styles.selectButton}
+                accessibilityRole="button"
+                accessibilityLabel="Select state"
                 onPress={() => {
                   setPickerSearch('');
                   setPicker('state');
@@ -288,6 +299,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
               <Text style={styles.label}>City *</Text>
               <Pressable
                 style={styles.selectButton}
+                accessibilityRole="button"
+                accessibilityLabel="Select city"
                 onPress={() => {
                   setPickerSearch('');
                   setPicker('city');
@@ -319,6 +332,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                   <Pressable
                     key={group}
                     onPress={() => setBloodGroup(group)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Blood group ${group}`}
                     style={[styles.bloodButton, bloodGroup === group && styles.bloodButtonSelected]}
                   >
                     <Text style={[styles.bloodText, bloodGroup === group && styles.bloodTextSelected]}>
@@ -339,6 +354,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                   </Text>
                 </View>
                 <Switch
+                  accessibilityLabel="Available to donate blood"
                   value={donorAvailable}
                   onValueChange={setDonorAvailable}
                   trackColor={{ false: '#d9dfe4', true: '#760009' }}
@@ -351,7 +367,13 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
           {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
 
-          <Pressable style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
+          <Pressable
+            style={styles.submitButton}
+            accessibilityRole="button"
+            accessibilityLabel={mode === 'login' ? 'Login' : 'Create Account'}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
             {loading ? <Text style={styles.submitText}>Please wait...</Text> : (
               <>
                 <MaterialCommunityIcons name={mode === 'login' ? 'login' : 'account-plus'} size={18} color="#ffffff" />
@@ -391,6 +413,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
               <MaterialCommunityIcons name="magnify" size={19} color="#59413e" />
               <TextInput
                 value={pickerSearch}
+                accessibilityLabel={picker === 'state' ? 'Search state' : 'Search city'}
                 onChangeText={setPickerSearch}
                 placeholder={picker === 'state' ? 'Search state...' : 'Search city or type custom...'}
                 placeholderTextColor="#8d706d"
