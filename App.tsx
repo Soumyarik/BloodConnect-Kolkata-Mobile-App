@@ -711,7 +711,7 @@ function HomeScreen({
           <Text style={[styles.tabText, styles.tabTextActive]}>Home</Text>
         </Pressable>
 
-        <Pressable style={styles.tabItem} onPress={onFindDonor} accessibilityLabel="Find Donor">
+        <Pressable style={styles.tabItem} onPress={onFindDonor} accessibilityRole="tab" accessibilityLabel="Find Donor">
           <MaterialCommunityIcons name="account-search" size={20} color="#59413e" />
           <Text style={styles.tabText}>Find Donor</Text>
         </Pressable>
@@ -893,6 +893,7 @@ function FindDonorScreen({
   const [kolkataAddressDraft, setKolkataAddressDraft] = useState('');
   const [savingKolkataAddress, setSavingKolkataAddress] = useState(false);
   const [isRemoteKolkataResident, setIsRemoteKolkataResident] = useState(false);
+  const hasUserSelectedBloodRef = useRef(false);
   const hasPromptedOutsideRef = useRef(false);
   const locationWatcherRef = useRef<Location.LocationSubscription | null>(null);
 
@@ -921,11 +922,7 @@ function FindDonorScreen({
         const blood = prof?.blood_group || user.user_metadata?.blood_group || 'A+';
         const city = prof?.city || 'Kolkata';
         const area = prof?.area || '';
-        const available = Boolean(prof?.donor_available) && prof?.is_test_account !== true;
-
-        if (prof?.latitude != null && prof?.longitude != null) {
-          setDeviceLocationCoords({ latitude: prof.latitude, longitude: prof.longitude });
-        }
+        const available = Boolean(prof?.donor_available);
 
         setUserBloodGroup(blood);
         setUserCity(city);
@@ -947,7 +944,7 @@ function FindDonorScreen({
         );
 
         // If not opened from an explicit request, default to the user's blood group
-        if (!requestId) {
+        if (!requestId && !hasUserSelectedBloodRef.current) {
           setSelectedBlood(blood);
         }
       } catch (err) {
@@ -1037,6 +1034,7 @@ function FindDonorScreen({
         latitude?: number | null;
         longitude?: number | null;
       }> = [];
+      let fetchError: Error | null = null;
 
       const refCoords = coordsOverride !== undefined ? coordsOverride : deviceLocationCoords;
 
@@ -1049,53 +1047,81 @@ function FindDonorScreen({
           p_user_lng: refCoords.longitude,
           p_nearby_km: NEARBY_DISTANCE_KM,
         });
-        if (!nearbyRes.error && Array.isArray(nearbyRes.data) && nearbyRes.data.length > 0) {
+        if (nearbyRes.error) {
+          fetchError = new Error(nearbyRes.error.message);
+        } else if (Array.isArray(nearbyRes.data)) {
           rows = nearbyRes.data;
         }
       }
 
       // 2. Primary RPC query with user's city if not already loaded
-      if (rows.length === 0) {
+      if (rows.length === 0 && (!refCoords || refCoords.latitude == null || fetchError != null)) {
         const rpcRes = await supabase.rpc('get_available_donors', {
           p_blood_groups: bloodGroupsToQuery,
           p_city: targetCity,
         });
-        if (!rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
+        if (rpcRes.error) {
+          fetchError = new Error(rpcRes.error.message);
+        } else if (Array.isArray(rpcRes.data)) {
           rows = rpcRes.data;
+          fetchError = null;
         }
       }
 
-      // 3. Fallback: Query all registered donors across Kolkata / Bengal matching blood group
-      if (rows.length === 0) {
+      // 3. Broad query across all registered donors ONLY if no specific city was requested
+      if (rows.length === 0 && !targetCity && fetchError == null) {
         const broadRpc = await supabase.rpc('get_available_donors', {
           p_blood_groups: bloodGroupsToQuery,
           p_city: '',
         });
-        if (!broadRpc.error && Array.isArray(broadRpc.data) && broadRpc.data.length > 0) {
+        if (broadRpc.error) {
+          fetchError = new Error(broadRpc.error.message);
+        } else if (Array.isArray(broadRpc.data)) {
           rows = broadRpc.data;
-        } else {
-          // 4. Fallback: Direct select on profiles for all non-test accounts
-          let query = supabase
-            .from('profiles')
-            .select('id, full_name, blood_group, city, area, phone, donor_available, is_test_account, latitude, longitude')
-            .eq('is_test_account', false)
-            .eq('donor_available', true);
-
-          if (bloodGroup !== 'ALL' && bloodGroupsToQuery.length > 0) {
-            query = query.in('blood_group', bloodGroupsToQuery);
-          }
-          const directRes = await query;
-          if (!directRes.error && directRes.data) {
-            rows = directRes.data as typeof rows;
-          }
         }
+      }
+
+      // 4. Safe fallback: Direct select on profiles without exposing coordinates or private contact
+      if (rows.length === 0 && fetchError == null) {
+        let query = supabase
+          .from('profiles')
+          .select('id, full_name, blood_group, city, area, donor_available, is_test_account')
+          .eq('is_test_account', false)
+          .eq('donor_available', true);
+
+        if (targetCity) {
+          query = query.ilike('city', `%${targetCity}%`);
+        }
+        if (bloodGroup !== 'ALL' && bloodGroupsToQuery.length > 0) {
+          query = query.in('blood_group', bloodGroupsToQuery);
+        }
+        const directRes = await query;
+        if (!directRes.error && directRes.data) {
+          rows = directRes.data as typeof rows;
+        } else if (directRes.error) {
+          fetchError = new Error(directRes.error.message);
+        }
+      }
+
+      if (fetchError && rows.length === 0) {
+        throw fetchError;
       }
 
       const normalizedArea = (currentArea || '').toLowerCase().trim();
       const currentUserId = user?.id;
 
       const mapped: Donor[] = rows
-        .filter((row) => row.id !== currentUserId && row.donor_available === true)
+        .filter((row) => {
+          if (row.id === currentUserId || row.donor_available !== true) return false;
+          if (targetCity) {
+            const donorCity = (row.city || '').toLowerCase().trim();
+            const normalizedTargetCity = targetCity.toLowerCase().trim();
+            if (donorCity && !donorCity.includes(normalizedTargetCity) && !normalizedTargetCity.includes(donorCity)) {
+              return false;
+            }
+          }
+          return true;
+        })
         .map((row) => {
           const donorArea = (row.area || '').toLowerCase().trim();
           const isSameArea = Boolean(
@@ -1103,16 +1129,6 @@ function FindDonorScreen({
             donorArea &&
             (donorArea.includes(normalizedArea) || normalizedArea.includes(donorArea))
           );
-
-          let distanceKm: number | null = null;
-          if (refCoords && row.latitude != null && row.longitude != null) {
-            distanceKm = calculateDistanceKm(
-              refCoords.latitude,
-              refCoords.longitude,
-              row.latitude,
-              row.longitude
-            );
-          }
 
           return {
             id: row.id,
@@ -1123,33 +1139,20 @@ function FindDonorScreen({
             phone: row.phone || '',
             available: row.donor_available ?? true,
             isSameArea,
-            isNearby: row.is_nearby === true || (distanceKm != null && distanceKm <= NEARBY_DISTANCE_KM),
-            latitude: row.latitude,
-            longitude: row.longitude,
-            distanceKm,
+            isNearby: Boolean(row.is_nearby),
+            latitude: null,
+            longitude: null,
+            distanceKm: null,
           };
         });
 
       mapped.sort((a, b) => {
-        // Closest measured distance first
-        if (a.distanceKm != null && b.distanceKm != null) {
-          return a.distanceKm - b.distanceKm;
-        }
-        if (a.distanceKm != null && b.distanceKm == null) return -1;
-        if (a.distanceKm == null && b.distanceKm != null) return 1;
-
         if (a.isNearby && !b.isNearby) return -1;
         if (!a.isNearby && b.isNearby) return 1;
 
-        // Same area next
         if (a.isSameArea && !b.isSameArea) return -1;
         if (!a.isSameArea && b.isSameArea) return 1;
 
-        // Users with phone numbers next
-        if (a.phone && !b.phone) return -1;
-        if (!a.phone && b.phone) return 1;
-
-        // Available donors next
         if (a.available && !b.available) return -1;
         if (!a.available && b.available) return 1;
 
@@ -1158,7 +1161,7 @@ function FindDonorScreen({
 
       setDonors(mapped);
     } catch (err) {
-      setErrorMessage('Unable to load donors: ' + (err instanceof Error ? err.message : 'Please try again.'));
+      setErrorMessage(sanitizeUserErrorMessage(err, 'Unable to load donors. Please try again.'));
       setDonors([]);
     } finally {
       setLoading(false);
@@ -1185,7 +1188,9 @@ function FindDonorScreen({
       const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = position.coords;
       const coords = { latitude, longitude };
-      setDeviceLocationCoords(coords);
+      setDeviceLocationCoords((prev) =>
+        prev && prev.latitude === coords.latitude && prev.longitude === coords.longitude ? prev : coords
+      );
       setGpsCoords(coords);
 
       let detectedCity = 'Kolkata';
@@ -1426,7 +1431,7 @@ function FindDonorScreen({
 
   const requestDonor = useCallback((donor: Donor) => {
     if (!requestId) {
-      showMessage('Contact Donor Directly', `You can contact ${donor.name} directly using the Call, SMS, or WhatsApp buttons below.`);
+      showMessage('Create a Blood Request', `To protect donor privacy, contact details are shared after request acceptance. Please create a blood request first.`);
       return;
     }
 
@@ -1491,13 +1496,12 @@ function FindDonorScreen({
       d.name.toLowerCase().includes(q) ||
       d.city.toLowerCase().includes(q) ||
       d.area.toLowerCase().includes(q) ||
-      d.blood.toLowerCase().includes(q) ||
-      d.phone.toLowerCase().includes(q)
+      d.blood.toLowerCase().includes(q)
     ));
   }, [donors, searchQuery]);
 
   const visibleMyDonorProfile = useMemo(() => {
-    if (!myDonorProfile) return null;
+    if (!myDonorProfile || !myDonorProfile.available) return null;
     const matchesBlood =
       selectedBlood === 'ALL'
         ? true
@@ -1632,7 +1636,7 @@ function FindDonorScreen({
               </Pressable>
             </View>
             <Text style={styles.findDonorSubtitle}>
-              Showing verified {filterMode === 'exact' ? selectedBlood : 'compatible'} blood donors available in {userCity || 'Kolkata'}. Reach out directly via call or message.
+              Showing verified {filterMode === 'exact' ? selectedBlood : 'compatible'} blood donors available in {userCity || 'Kolkata'}. Send a blood request to connect securely.
             </Text>
             {isRemoteKolkataResident ? (
               <View style={styles.remoteKolkataNotice}>
@@ -1687,7 +1691,10 @@ function FindDonorScreen({
           {['ALL', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => (
             <Pressable
               key={group}
-              onPress={() => setSelectedBlood(group)}
+              onPress={() => {
+                hasUserSelectedBloodRef.current = true;
+                setSelectedBlood(group);
+              }}
               style={[styles.bloodChoice, selectedBlood === group && styles.bloodChoiceSelected]}
               accessibilityLabel={`Select blood group ${group}`}
             >
@@ -1733,10 +1740,11 @@ function FindDonorScreen({
           <MaterialCommunityIcons name="magnify" size={20} color="#59413e" />
           <TextInput
             style={styles.searchInput}
-            placeholder={`Filter by name, phone, area in ${userCity || 'Kolkata'}...`}
+            placeholder={`Filter by name, area in ${userCity || 'Kolkata'}...`}
             placeholderTextColor="#8d706d"
             value={searchQuery}
             onChangeText={setSearchQuery}
+            accessibilityLabel="Search donors"
           />
           {searchQuery ? (
             <Pressable onPress={() => setSearchQuery('')} hitSlop={8} accessibilityLabel="Clear search">
@@ -1745,7 +1753,23 @@ function FindDonorScreen({
           ) : null}
         </View>
 
-        {errorMessage ? <Text style={styles.profileErrorText}>{errorMessage}</Text> : null}
+        {errorMessage ? (
+          <View style={styles.donorEmptyState} accessibilityLabel="Error loading donors">
+            <View style={styles.donorEmptyIcon}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={32} color="#ba1a1a" />
+            </View>
+            <Text style={styles.emptyStateTitle}>Error Loading Donors</Text>
+            <Text style={styles.emptyStateText}>{errorMessage}</Text>
+            <Pressable
+              style={[styles.profilePrimaryButtonSmall, { marginTop: 12 }]}
+              onPress={() => void loadDonors(selectedBlood, filterMode, userCity, userArea, deviceLocationCoords)}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading donors"
+            >
+              <Text style={styles.profilePrimaryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.findDonorResults}>
           <View style={styles.findDonorResultsHeader}>
@@ -1849,20 +1873,13 @@ function FindDonorScreen({
                       <Text style={styles.donorMeta}>
                         📍 {[donor.area, donor.city].filter(Boolean).join(', ') || userCity || 'Kolkata'}
                       </Text>
-                      {donor.distanceKm != null ? (
-                        <View style={styles.nearestBadge}>
-                          <View style={styles.livePulseDot} />
-                          <Text style={styles.nearestBadgeText}>
-                            Live GPS • {donor.distanceKm < 1 ? '< 1 km away' : `${donor.distanceKm.toFixed(1)} km away`}
-                          </Text>
-                        </View>
-                      ) : donor.isNearby ? (
-                        <View style={styles.sameAreaBadge}>
+                      {donor.isNearby ? (
+                        <View style={styles.sameAreaBadge} accessibilityLabel="Live GPS • Near You">
                           <View style={styles.livePulseDot} />
                           <Text style={styles.sameAreaBadgeText}>Live GPS • Near You</Text>
                         </View>
                       ) : donor.isSameArea ? (
-                        <View style={styles.sameAreaBadge}>
+                        <View style={styles.sameAreaBadge} accessibilityLabel={`Area match ${donor.area}`}>
                           <MaterialCommunityIcons name="map-marker-radius" size={13} color="#065f46" />
                           <Text style={styles.sameAreaBadgeText}>Near You ({donor.area})</Text>
                         </View>
@@ -1875,55 +1892,68 @@ function FindDonorScreen({
                   </View>
 
                   <View style={styles.donorContactBox}>
-                    <Pressable
-                      style={styles.donorPhoneRow}
-                      onPress={() => donor.phone && handleCall(donor.phone, donor.name)}
-                      disabled={!donor.phone}
-                      accessibilityLabel={`Phone number ${donor.phone || 'not provided'}`}
-                    >
-                      <MaterialCommunityIcons name="phone" size={16} color="#760009" />
-                      <Text style={styles.donorPhoneText}>
-                        {donor.phone ? donor.phone : 'Phone not provided'}
-                      </Text>
-                      {donor.phone ? (
-                        <MaterialCommunityIcons name="phone-outgoing" size={14} color="#760009" style={{ marginLeft: 4 }} />
-                      ) : null}
-                    </Pressable>
+                    {responseStatus === 'accepted' ? (
+                      <>
+                        <Pressable
+                          style={styles.donorPhoneRow}
+                          onPress={() => donor.phone && handleCall(donor.phone, donor.name)}
+                          disabled={!donor.phone}
+                          accessibilityLabel={`Phone number ${donor.phone || 'not provided'}`}
+                        >
+                          <MaterialCommunityIcons name="phone" size={16} color="#760009" />
+                          <Text style={styles.donorPhoneText}>
+                            {donor.phone ? donor.phone : 'Phone not provided'}
+                          </Text>
+                          {donor.phone ? (
+                            <MaterialCommunityIcons name="phone-outgoing" size={14} color="#760009" style={{ marginLeft: 4 }} />
+                          ) : null}
+                        </Pressable>
 
-                    <View style={styles.contactActionsRow}>
-                      {donor.phone ? (
-                        <>
-                          <Pressable
-                            style={styles.contactCallBtn}
-                            onPress={() => handleCall(donor.phone, donor.name)}
-                            accessibilityLabel={`Call ${donor.name}`}
-                          >
-                            <MaterialCommunityIcons name="phone" size={16} color="#ffffff" />
-                            <Text style={styles.contactBtnText}>Call</Text>
-                          </Pressable>
+                        <View style={styles.contactActionsRow}>
+                          {donor.phone ? (
+                            <>
+                              <Pressable
+                                style={styles.contactCallBtn}
+                                onPress={() => handleCall(donor.phone, donor.name)}
+                                accessibilityLabel={`Call ${donor.name}`}
+                              >
+                                <MaterialCommunityIcons name="phone" size={16} color="#ffffff" />
+                                <Text style={styles.contactBtnText}>Call</Text>
+                              </Pressable>
 
-                          <Pressable
-                            style={styles.contactSmsBtn}
-                            onPress={() => handleSMS(donor.phone, donor.name, donor.blood)}
-                            accessibilityLabel={`SMS ${donor.name}`}
-                          >
-                            <MaterialCommunityIcons name="message-text" size={16} color="#191c1e" />
-                            <Text style={styles.contactDarkBtnText}>SMS</Text>
-                          </Pressable>
+                              <Pressable
+                                style={styles.contactSmsBtn}
+                                onPress={() => handleSMS(donor.phone, donor.name, donor.blood)}
+                                accessibilityLabel={`SMS ${donor.name}`}
+                              >
+                                <MaterialCommunityIcons name="message-text" size={16} color="#191c1e" />
+                                <Text style={styles.contactDarkBtnText}>SMS</Text>
+                              </Pressable>
 
-                          <Pressable
-                            style={styles.contactWaBtn}
-                            onPress={() => handleWhatsApp(donor.phone, donor.name, donor.blood)}
-                            accessibilityLabel={`WhatsApp ${donor.name}`}
-                          >
-                            <MaterialCommunityIcons name="whatsapp" size={16} color="#ffffff" />
-                            <Text style={styles.contactBtnText}>WhatsApp</Text>
-                          </Pressable>
-                        </>
-                      ) : (
-                        <Text style={styles.noPhoneText}>Direct contact info not shared by donor.</Text>
-                      )}
-                    </View>
+                              <Pressable
+                                style={styles.contactWaBtn}
+                                onPress={() => handleWhatsApp(donor.phone, donor.name, donor.blood)}
+                                accessibilityLabel={`WhatsApp ${donor.name}`}
+                              >
+                                <MaterialCommunityIcons name="whatsapp" size={16} color="#ffffff" />
+                                <Text style={styles.contactBtnText}>WhatsApp</Text>
+                              </Pressable>
+                            </>
+                          ) : (
+                            <Text style={styles.noPhoneText}>Direct contact info not shared by donor.</Text>
+                          )}
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.donorPhoneRow} accessibilityLabel="Contact details protected until request accepted">
+                        <MaterialCommunityIcons name="shield-lock-outline" size={16} color="#760009" />
+                        <Text style={styles.donorPhoneText}>
+                          {responseStatus === 'pending'
+                            ? 'Request Pending • Contact shared upon acceptance'
+                            : 'Contact details protected until request accepted'}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   {requestId ? (
@@ -1944,7 +1974,15 @@ function FindDonorScreen({
                                 : 'Send Blood Request'}
                       </Text>
                     </Pressable>
-                  ) : null}
+                  ) : (
+                    <Pressable
+                      style={[styles.donorRequestButton, { marginTop: 10 }]}
+                      onPress={onRequestBlood}
+                      accessibilityLabel={`Send blood request to ${donor.name}`}
+                    >
+                      <Text style={styles.donorRequestText}>Request Blood to Connect</Text>
+                    </Pressable>
+                  )}
                 </View>
               );
               })}
@@ -1963,18 +2001,22 @@ function FindDonorScreen({
                   : 'There are currently no registered compatible donors marked as available here. You can post an open blood request to alert donors across the city.'}
               </Text>
 
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16, width: '100%' }}>
                 {filterMode === 'exact' ? (
                   <Pressable
-                    style={styles.profileOutlineButton}
+                    style={[styles.profileOutlineButton, { flex: 1, width: 'auto' }]}
                     onPress={() => setFilterMode('compatible')}
+                    accessibilityRole="button"
+                    accessibilityLabel="View Compatible Groups"
                   >
                     <Text style={styles.profileOutlineButtonText}>View Compatible Groups</Text>
                   </Pressable>
                 ) : null}
                 <Pressable
-                  style={styles.profilePrimaryButtonSmall}
+                  style={[styles.profilePrimaryButtonSmall, { flex: 1 }]}
                   onPress={onRequestBlood}
+                  accessibilityRole="button"
+                  accessibilityLabel="Request Blood"
                 >
                   <Text style={styles.profilePrimaryButtonText}>Request Blood</Text>
                 </Pressable>
@@ -1989,7 +2031,7 @@ function FindDonorScreen({
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Find Donor">
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityRole="tab" accessibilityLabel="Find Donor">
           <MaterialCommunityIcons name="account-search" size={20} color="#760009" />
           <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Find Donor</Text>
         </Pressable>
@@ -2658,7 +2700,7 @@ function RequestsScreen({
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityLabel="Find Donor">
+        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityRole="tab" accessibilityLabel="Find Donor">
           <MaterialCommunityIcons name="account-search" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Find Donor</Text>
         </Pressable>
@@ -3279,7 +3321,7 @@ function BloodRequestDetailsScreen({
 
       <View style={styles.bottomNav}>
         <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home"><MaterialCommunityIcons name="home" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Home</Text></Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityLabel="Find Donor"><MaterialCommunityIcons name="account-search" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Find Donor</Text></Pressable>
+        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityRole="tab" accessibilityLabel="Find Donor"><MaterialCommunityIcons name="account-search" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Find Donor</Text></Pressable>
         <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={onRequests} accessibilityLabel="Requests"><MaterialCommunityIcons name="water" size={20} color="#760009" /><Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Requests</Text></Pressable>
         <Pressable style={styles.bottomNavItem} onPress={onProfile} accessibilityLabel="Profile"><MaterialCommunityIcons name="account" size={20} color="#59413e" /><Text style={styles.bottomNavText}>Profile</Text></Pressable>
       </View>
@@ -4714,7 +4756,7 @@ function RequestBloodScreen({
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
 
-        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityLabel="Find Donor">
+        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityRole="tab" accessibilityLabel="Find Donor">
           <MaterialCommunityIcons name="account-search" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Find Donor</Text>
         </Pressable>
