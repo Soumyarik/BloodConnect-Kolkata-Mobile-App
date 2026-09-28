@@ -49,7 +49,7 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [state, setState] = useState('West Bengal');
+  const [state, setState] = useState('');
   const [city, setCity] = useState('');
   const [bloodGroup, setBloodGroup] = useState('');
   const [donorAvailable, setDonorAvailable] = useState(false);
