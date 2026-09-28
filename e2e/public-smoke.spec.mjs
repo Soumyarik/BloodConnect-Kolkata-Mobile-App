@@ -48,7 +48,7 @@ test.describe('BloodConnect public web smoke tests', () => {
 
     await page.getByLabel('Full name').fill('Playwright Test User');
     await page.getByLabel('Email').fill('playwright-invalid-test@example.com');
-    await page.getByLabel('Password').fill('test-password');
+    await page.getByLabel('Password', { exact: true }).fill('test-password');
     await page.getByLabel('Confirm password').fill('test-password');
 
     await page.getByRole('button', { name: 'Select state' }).click();
