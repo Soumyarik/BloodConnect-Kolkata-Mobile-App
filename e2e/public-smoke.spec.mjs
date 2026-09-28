@@ -29,17 +29,20 @@ test.describe('BloodConnect public web smoke tests', () => {
     await page.getByRole('tab', { name: 'Sign Up' }).click();
 
     await page.getByRole('button', { name: 'Select state' }).click();
-    await expect(page.getByText('Select State / UT', { exact: true })).toBeVisible();
+    const stateModal = page.getByRole('dialog');
+    await expect(stateModal.getByText('Select State / UT', { exact: true })).toBeVisible();
 
-    await page.getByLabel('Search state').fill('West Bengal');
-    await expect(page.getByText('West Bengal', { exact: true }).last()).toBeVisible();
-    await page.getByText('West Bengal', { exact: true }).last().click();
+    await stateModal.getByLabel('Search state').fill('West Bengal');
+    const wbOption = stateModal.getByRole('button', { name: 'West Bengal', exact: true });
+    await expect(wbOption).toBeVisible();
+    await wbOption.click();
 
     await page.getByRole('button', { name: 'Select city' }).click();
-    await expect(page.getByText('Select City', { exact: true })).toBeVisible();
+    const cityModal = page.getByRole('dialog');
+    await expect(cityModal.getByText('Select City', { exact: true })).toBeVisible();
 
-    await page.getByLabel('Search city').fill('Kolkata');
-    await expect(page.getByText('Kolkata', { exact: true }).first()).toBeVisible();
+    await cityModal.getByLabel('Search city').fill('Kolkata');
+    await expect(cityModal.getByRole('button', { name: 'Kolkata', exact: true })).toBeVisible();
   });
 
   test('signup validates required phone before account creation', async ({ page }) => {
@@ -52,12 +55,14 @@ test.describe('BloodConnect public web smoke tests', () => {
     await page.getByLabel('Confirm password').fill('test-password');
 
     await page.getByRole('button', { name: 'Select state' }).click();
-    await page.getByLabel('Search state').fill('West Bengal');
-    await page.getByText('West Bengal', { exact: true }).last().click();
+    const stateModal = page.getByRole('dialog');
+    await stateModal.getByLabel('Search state').fill('West Bengal');
+    await stateModal.getByRole('button', { name: 'West Bengal', exact: true }).click();
 
     await page.getByRole('button', { name: 'Select city' }).click();
-    await page.getByLabel('Search city').fill('Kolkata');
-    await page.getByText('Kolkata', { exact: true }).first().click();
+    const cityModal = page.getByRole('dialog');
+    await cityModal.getByLabel('Search city').fill('Kolkata');
+    await cityModal.getByRole('button', { name: 'Kolkata', exact: true }).click();
 
     await page.getByRole('button', { name: 'Blood group O+' }).click();
     await page.getByRole('button', { name: 'Create Account' }).click();

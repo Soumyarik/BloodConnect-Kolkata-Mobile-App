@@ -316,6 +316,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 {POPULAR_CITIES.slice(0, 4).map((quickCity) => (
                   <Pressable
                     key={quickCity}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Quick select ${quickCity}`}
                     style={[styles.quickChip, city.toLowerCase() === quickCity.toLowerCase() && styles.quickChipSelected]}
                     onPress={() => selectCity(quickCity, 'WB')}
                   >
@@ -404,7 +406,12 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                       : `All Indian cities (${pickerOptions.length} available)`}
                 </Text>
               </View>
-              <Pressable style={styles.modalClose} onPress={() => setPicker(null)}>
+              <Pressable
+                style={styles.modalClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close picker"
+                onPress={() => setPicker(null)}
+              >
                 <MaterialCommunityIcons name="close" size={20} color="#59413e" />
               </Pressable>
             </View>
@@ -431,6 +438,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
               {showCustomOption && (
                 <Pressable
                   style={[styles.optionRow, styles.customOptionRow]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use custom city "${trimmedSearch}"`}
                   onPress={() => selectCity(trimmedSearch)}
                 >
                   <View style={styles.customOptionCopy}>
@@ -447,6 +456,8 @@ export function AuthScreen({ signIn, signUp }: AuthScreenProps) {
                 return (
                   <Pressable
                     key={`${picker}-${item.id}-${name}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={name}
                     style={[styles.optionRow, isSelected && styles.optionRowSelected]}
                     onPress={() => {
                       if (picker === 'state') {
