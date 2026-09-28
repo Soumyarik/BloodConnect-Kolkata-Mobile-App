@@ -3783,7 +3783,12 @@ function ProfileScreen({
               </Text>
             </View>
           </View>
-          <Pressable style={styles.profileOutlineButton} onPress={openEditProfile}>
+          <Pressable
+            style={styles.profileOutlineButton}
+            onPress={openEditProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Edit Profile"
+          >
             <MaterialCommunityIcons name="pencil-outline" size={18} color="#760009" />
             <Text style={styles.profileOutlineButtonText}>Edit Profile</Text>
           </Pressable>
@@ -3800,6 +3805,7 @@ function ProfileScreen({
               onValueChange={updateAvailability}
               trackColor={{ false: '#d9dfe4', true: '#760009' }}
               thumbColor="#ffffff"
+              accessibilityLabel="Donor Availability"
             />
           </View>
           <Text style={styles.profileFinePrint}>You can change your availability anytime.</Text>
@@ -3817,6 +3823,7 @@ function ProfileScreen({
                 style={styles.profileRefreshLocationBtn}
                 onPress={refreshDonorLiveLocation}
                 disabled={updatingLiveLocation}
+                accessibilityRole="button"
                 accessibilityLabel="Refresh live donor location"
               >
                 <MaterialCommunityIcons name="crosshairs-gps" size={15} color="#760009" />
@@ -3844,7 +3851,12 @@ function ProfileScreen({
               <Text style={styles.profileValueText}>{profile.gender || 'Not added yet'}</Text>
             </View>
           </View>
-          <Pressable style={styles.profilePrimaryButton} onPress={openEditProfile}>
+          <Pressable
+            style={styles.profilePrimaryButton}
+            onPress={openEditProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Update Information"
+          >
             <MaterialCommunityIcons name="update" size={18} color="#ffffff" />
             <Text style={styles.profilePrimaryButtonText}>Update Information</Text>
           </Pressable>
@@ -3905,7 +3917,12 @@ function ProfileScreen({
               <Text style={styles.profileMutedText}>{emergencyContact.relationship} • {emergencyContact.phone}</Text>
             </View>
           ) : null}
-          <Pressable style={styles.profileOutlineButton} onPress={openEmergencyContact}>
+          <Pressable
+            style={styles.profileOutlineButton}
+            onPress={openEmergencyContact}
+            accessibilityRole="button"
+            accessibilityLabel={emergencyContact ? 'Edit Emergency Contact' : 'Add Emergency Contact'}
+          >
             <MaterialCommunityIcons name="account-plus-outline" size={18} color="#760009" />
             <Text style={styles.profileOutlineButtonText}>{emergencyContact ? 'Edit Emergency Contact' : 'Add Emergency Contact'}</Text>
           </Pressable>
@@ -3914,7 +3931,12 @@ function ProfileScreen({
         <View style={styles.profileCard}>
           <Text style={styles.profileSectionTitle}>Donation History</Text>
           <Text style={styles.profileMutedText}>Your personal donation history. Entries are self-reported and do not confirm medical eligibility.</Text>
-          <Pressable style={styles.profileSecondaryButtonFull} onPress={() => void loadDonationHistory()}>
+          <Pressable
+            style={styles.profileSecondaryButtonFull}
+            onPress={() => void loadDonationHistory()}
+            accessibilityRole="button"
+            accessibilityLabel="View Full History"
+          >
             <Text style={styles.profileSecondaryButtonText}>View Full History</Text>
           </Pressable>
         </View>
@@ -3938,7 +3960,12 @@ function ProfileScreen({
           ))}
         </View>
 
-        <Pressable style={styles.profileLogoutButton} onPress={() => setLogoutVisible(true)}>
+        <Pressable
+          style={styles.profileLogoutButton}
+          onPress={() => setLogoutVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Log Out"
+        >
           <MaterialCommunityIcons name="logout" size={18} color="#ba1a1a" />
           <Text style={styles.profileLogoutText}>Log Out</Text>
         </Pressable>
@@ -3946,7 +3973,10 @@ function ProfileScreen({
 
       <Modal visible={editProfileVisible} transparent animationType="slide" onRequestClose={() => setEditProfileVisible(false)}>
         <View style={styles.profileModalBackdrop}>
-          <View style={styles.profileModalCard}>
+          <View
+            style={styles.profileModalCard}
+            {...(Platform.OS === 'web' ? { role: 'dialog', 'aria-label': 'Edit Profile' } : {})}
+          >
             <Text style={styles.profileModalTitle}>Edit Profile</Text>
             <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }} keyboardShouldPersistTaps="handled">
               <Text style={styles.profileModalLabel}>Name</Text>
@@ -3954,6 +3984,7 @@ function ProfileScreen({
                 value={draftProfile.name}
                 onChangeText={(name) => setDraftProfile((current) => ({ ...current, name }))}
                 placeholder="Your name"
+                accessibilityLabel="Name"
                 placeholderTextColor="#8d706d"
                 style={styles.profileModalInput}
               />
@@ -3962,6 +3993,7 @@ function ProfileScreen({
                 value={draftProfile.phone}
                 onChangeText={(phone) => setDraftProfile((current) => ({ ...current, phone }))}
                 placeholder="Your phone number"
+                accessibilityLabel="Phone number"
                 placeholderTextColor="#8d706d"
                 keyboardType="phone-pad"
                 style={styles.profileModalInput}
@@ -3971,6 +4003,7 @@ function ProfileScreen({
                 value={draftProfile.city}
                 onChangeText={(city) => setDraftProfile((current) => ({ ...current, city }))}
                 placeholder="City"
+                accessibilityLabel="City"
                 placeholderTextColor="#8d706d"
                 style={styles.profileModalInput}
               />
@@ -3979,6 +4012,7 @@ function ProfileScreen({
                 value={draftProfile.area}
                 onChangeText={(area) => setDraftProfile((current) => ({ ...current, area }))}
                 placeholder="Area or locality"
+                accessibilityLabel="Area"
                 placeholderTextColor="#8d706d"
                 style={styles.profileModalInput}
               />
@@ -3987,6 +4021,7 @@ function ProfileScreen({
                 value={draftProfile.dateOfBirth}
                 onChangeText={(dateOfBirth) => setDraftProfile((current) => ({ ...current, dateOfBirth }))}
                 placeholder="YYYY-MM-DD"
+                accessibilityLabel="Date of birth"
                 placeholderTextColor="#8d706d"
                 style={styles.profileModalInput}
               />
@@ -3995,6 +4030,7 @@ function ProfileScreen({
                 value={draftProfile.gender}
                 onChangeText={(gender) => setDraftProfile((current) => ({ ...current, gender }))}
                 placeholder="Gender"
+                accessibilityLabel="Gender"
                 placeholderTextColor="#8d706d"
                 style={styles.profileModalInput}
               />
@@ -4004,6 +4040,8 @@ function ProfileScreen({
                   <Pressable
                     key={group}
                     onPress={() => setDraftProfile((current) => ({ ...current, bloodGroup: group }))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Blood group ${group}`}
                     style={[styles.profileBloodChoice, draftProfile.bloodGroup === group && styles.profileBloodChoiceSelected]}
                   >
                     <Text style={[styles.profileBloodChoiceText, draftProfile.bloodGroup === group && styles.profileBloodChoiceTextSelected]}>
@@ -4014,10 +4052,21 @@ function ProfileScreen({
               </View>
             </ScrollView>
             <View style={styles.profileModalActions}>
-              <Pressable style={styles.profileModalCancel} onPress={() => setEditProfileVisible(false)}>
+              <Pressable
+                style={styles.profileModalCancel}
+                onPress={() => setEditProfileVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel Edit Profile"
+              >
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.profileModalSave} disabled={saving} onPress={saveProfile}>
+              <Pressable
+                style={styles.profileModalSave}
+                disabled={saving}
+                onPress={saveProfile}
+                accessibilityRole="button"
+                accessibilityLabel="Save Changes"
+              >
                 <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
               </Pressable>
             </View>
@@ -4027,13 +4076,17 @@ function ProfileScreen({
 
       <Modal visible={contactVisible} transparent animationType="slide" onRequestClose={() => setContactVisible(false)}>
         <View style={styles.profileModalBackdrop}>
-          <View style={styles.profileModalCard}>
+          <View
+            style={styles.profileModalCard}
+            {...(Platform.OS === 'web' ? { role: 'dialog', 'aria-label': 'Emergency Contact' } : {})}
+          >
             <Text style={styles.profileModalTitle}>Emergency Contact</Text>
             <Text style={styles.profileModalLabel}>Name</Text>
             <TextInput
               value={draftContact.name}
               onChangeText={(name) => setDraftContact((current) => ({ ...current, name }))}
               placeholder="Contact name"
+              accessibilityLabel="Contact name"
               placeholderTextColor="#8d706d"
               style={styles.profileModalInput}
             />
@@ -4042,6 +4095,7 @@ function ProfileScreen({
               value={draftContact.phone}
               onChangeText={(phone) => setDraftContact((current) => ({ ...current, phone }))}
               placeholder="Contact phone number"
+              accessibilityLabel="Contact phone number"
               placeholderTextColor="#8d706d"
               keyboardType="phone-pad"
               style={styles.profileModalInput}
@@ -4051,14 +4105,26 @@ function ProfileScreen({
               value={draftContact.relationship}
               onChangeText={(relationship) => setDraftContact((current) => ({ ...current, relationship }))}
               placeholder="For example, sibling"
+              accessibilityLabel="Relationship"
               placeholderTextColor="#8d706d"
               style={styles.profileModalInput}
             />
             <View style={styles.profileModalActions}>
-              <Pressable style={styles.profileModalCancel} onPress={() => setContactVisible(false)}>
+              <Pressable
+                style={styles.profileModalCancel}
+                onPress={() => setContactVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel Emergency Contact"
+              >
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.profileModalSave} disabled={saving} onPress={saveEmergencyContact}>
+              <Pressable
+                style={styles.profileModalSave}
+                disabled={saving}
+                onPress={saveEmergencyContact}
+                accessibilityRole="button"
+                accessibilityLabel="Save Contact"
+              >
                 <Text style={styles.profileModalSaveText}>{saving ? 'Saving...' : 'Save Contact'}</Text>
               </Pressable>
             </View>
@@ -4068,16 +4134,26 @@ function ProfileScreen({
 
       <Modal visible={logoutVisible} transparent animationType="fade" onRequestClose={() => setLogoutVisible(false)}>
         <View style={styles.profileModalBackdrop}>
-          <View style={styles.profileModalCard}>
+          <View
+            style={styles.profileModalCard}
+            {...(Platform.OS === 'web' ? { role: 'dialog', 'aria-label': 'Log Out' } : {})}
+          >
             <Text style={styles.profileModalTitle}>Log Out</Text>
             <Text style={styles.profileMutedText}>Are you sure you want to log out?</Text>
             {profileError ? <Text style={styles.profileErrorText}>{profileError}</Text> : null}
             <View style={styles.profileModalActions}>
-              <Pressable style={styles.profileModalCancel} onPress={() => setLogoutVisible(false)}>
+              <Pressable
+                style={styles.profileModalCancel}
+                onPress={() => setLogoutVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel Log Out"
+              >
                 <Text style={styles.profileModalCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
                 style={styles.profileModalSave}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm Log Out"
                 onPress={async () => {
                   setProfileError('');
                   try {
@@ -4096,22 +4172,22 @@ function ProfileScreen({
       </Modal>
 
       <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityLabel="Home">
+        <Pressable style={styles.bottomNavItem} onPress={onHome} accessibilityRole="tab" accessibilityLabel="Home">
           <MaterialCommunityIcons name="home" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Home</Text>
         </Pressable>
 
-        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityLabel="Find Donor">
+        <Pressable style={styles.bottomNavItem} onPress={onFindDonor} accessibilityRole="tab" accessibilityLabel="Find Donor">
           <MaterialCommunityIcons name="account-search" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Find Donor</Text>
         </Pressable>
 
-        <Pressable style={styles.bottomNavItem} onPress={onRequests} accessibilityLabel="Requests">
+        <Pressable style={styles.bottomNavItem} onPress={onRequests} accessibilityRole="tab" accessibilityLabel="Requests">
           <MaterialCommunityIcons name="water" size={20} color="#59413e" />
           <Text style={styles.bottomNavText}>Requests</Text>
         </Pressable>
 
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityLabel="Profile">
+        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} accessibilityRole="tab" accessibilityLabel="Profile">
           <MaterialCommunityIcons name="account" size={20} color="#760009" />
           <Text style={[styles.bottomNavText, styles.bottomNavTextActive]}>Profile</Text>
         </Pressable>

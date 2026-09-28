@@ -43,3 +43,8 @@ supabase/.temp/
 # generated native folders
 /ios
 /android
+
+# test artifacts
+test-results/
+playwright-report/
+

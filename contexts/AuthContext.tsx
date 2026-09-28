@@ -52,7 +52,9 @@ async function ensureProfile(
   if (existingProfile) {
     const updates: Record<string, unknown> = {};
     if (existingProfile.donor_available === null || existingProfile.donor_available === undefined) {
-      updates.donor_available = Boolean(profile.bloodGroup || existingProfile.blood_group);
+      updates.donor_available = typeof profile.donorAvailable === 'boolean'
+        ? profile.donorAvailable
+        : Boolean(profile.bloodGroup || existingProfile.blood_group);
     }
     if (!existingProfile.city) {
       updates.city = profile.city || 'Kolkata';
@@ -66,13 +68,10 @@ async function ensureProfile(
     if (profile.city && (!existingProfile.city || existingProfile.city === 'Kolkata')) {
       updates.city = profile.city;
     }
-    if (typeof profile.donorAvailable === 'boolean') {
-      updates.donor_available = profile.donorAvailable;
-    }
     if (!existingProfile.blood_group && profile.bloodGroup) {
       updates.blood_group = profile.bloodGroup;
-      if (typeof profile.donorAvailable !== 'boolean') {
-        updates.donor_available = true;
+      if (existingProfile.donor_available === null || existingProfile.donor_available === undefined) {
+        updates.donor_available = typeof profile.donorAvailable === 'boolean' ? profile.donorAvailable : true;
       }
     }
     if (Object.keys(updates).length > 0) {
